@@ -203,27 +203,20 @@ describe("sources and immediate assistant access", () => {
     expect(screen.getByText("Gender is Female.")).toBeInTheDocument();
   });
 
-  it("renders student sign in interface with email, password, and google sign in", async () => {
-    vi.mocked(api).mockResolvedValue({ google_client_id: "" });
+  it("renders student sign in interface with email, password, and registration", async () => {
     render(<SignIn />);
     expect(screen.getByRole("heading", { name: "Student Sign In" })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("student@example.com")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("name@example.com")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Enter your password")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Sign in with Google/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Sign In with Email/ })).toBeInTheDocument();
 
     // Switch to Create Account
     fireEvent.click(screen.getByRole("button", { name: "Create Account" }));
     expect(screen.getByRole("heading", { name: "Create Student Account" })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("e.g. Ananya Sharma")).toBeInTheDocument();
-
-    // Click Google Sign-in to open Google account selector modal
-    fireEvent.click(screen.getByRole("button", { name: /Sign in with Google/ }));
-    expect(screen.getByText("Choose a Google student account or enter your Google email to authenticate:")).toBeInTheDocument();
-    expect(screen.getByText("Ananya Sharma")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("e.g. Your Name")).toBeInTheDocument();
   });
 
-  it("renders standalone AuthGateway when user is not authenticated", async () => {
+  it("renders standalone AuthGateway with Google Sign-In and credentials", async () => {
     vi.mocked(api).mockResolvedValue({ google_client_id: "" });
     const onAuthSuccess = vi.fn();
     render(<AuthGateway onAuthSuccess={onAuthSuccess} />);
@@ -231,13 +224,18 @@ describe("sources and immediate assistant access", () => {
     expect(screen.getByText("STUDENT PORTAL")).toBeInTheDocument();
     expect(screen.getByText("🔒 AUTHENTICATED ACCESS ONLY")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Student Sign In" })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("student@example.com")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("name@example.com")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Sign in with Google/ })).toBeInTheDocument();
 
-    // Switch to register tab
+    // Switch to register mode
     fireEvent.click(screen.getByRole("button", { name: "Create Account" }));
-    expect(screen.getByRole("heading", { name: "Register Student Account" })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("e.g. Ananya Sharma")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Create Student Account" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("e.g. Student Name")).toBeInTheDocument();
+
+    // Clicking Google button when no client_id configured prompts for Google Cloud Client ID
+    fireEvent.click(screen.getByRole("button", { name: /Sign in with Google/ }));
+    expect(screen.getByText("Connect Google Sign-In")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("e.g. 123456789-abcdef.apps.googleusercontent.com")).toBeInTheDocument();
   });
 
   it("gates application workspace so only signed-in candidates can view it", async () => {

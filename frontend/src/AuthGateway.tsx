@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { loginWithEmail, loginWithGoogle, registerWithEmail } from "./auth";
 import type { User } from "./types";
@@ -15,51 +15,210 @@ export default function AuthGateway({
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [googleModalOpen, setGoogleModalOpen] = useState(false);
-  const [googleCustomEmail, setGoogleCustomEmail] = useState("");
-  const [googleCustomName, setGoogleCustomName] = useState("");
 
-  // Check Google Client ID
+  // Google OAuth configuration
+  const [googleClientId, setGoogleClientId] = useState<string>(
+    localStorage.getItem("google_client_id") || "",
+  );
+  const [configModalOpen, setConfigModalOpen] = useState(false);
+  const [customClientIdInput, setCustomClientIdInput] = useState("");
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const tokenClientRef = useRef<any>(null);
+  const googleBtnContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Initialize Google Identity Services
+  const initGoogleAuth = (clientId: string) => {
+    if (!clientId || typeof window === "undefined") return;
+
+    const setupGsi = () => {
+      const google = (window as any).google;
+      if (!google?.accounts) return;
+
+      // 1. Setup ID Token receiver (One Tap and official rendered button)
+      try {
+        google.accounts.id.initialize({
+          client_id: clientId,
+          callback: async (response: { credential?: string }) => {
+            if (response.credential) {
+              setBusy(true);
+              setError("");
+              try {
+                const user = await loginWithGoogle({ credential: response.credential });
+                onAuthSuccess(user);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Google authentication failed.");
+              } finally {
+                setBusy(false);
+              }
+            }
+          },
+          auto_select: false,
+          cancel_on_tap_outside: true,
+        });
+
+        if (googleBtnContainerRef.current) {
+          googleBtnContainerRef.current.innerHTML = "";
+          google.accounts.id.renderButton(googleBtnContainerRef.current, {
+            type: "standard",
+            theme: "outline",
+            size: "large",
+            width: 340,
+            text: "signin_with",
+            shape: "rectangular",
+            logo_alignment: "left",
+          });
+        }
+      } catch (err) {
+        console.warn("Google Accounts ID init error:", err);
+      }
+
+      // 2. Setup OAuth2 Token Client with prompt='select_account'
+      // This forces Google to show ALL accounts logged into the system/browser
+      try {
+        tokenClientRef.current = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: "email profile openid",
+          prompt: "select_account",
+          callback: async (tokenResponse: { access_token?: string; error?: string; error_description?: string }) => {
+            if (tokenResponse.error) {
+              setError(tokenResponse.error_description || tokenResponse.error || "Google authorization cancelled.");
+              return;
+            }
+            if (tokenResponse.access_token) {
+              setBusy(true);
+              setError("");
+              try {
+                const user = await loginWithGoogle({ access_token: tokenResponse.access_token });
+                onAuthSuccess(user);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Google login failed.");
+              } finally {
+                setBusy(false);
+              }
+            }
+          },
+        });
+      } catch (err) {
+        console.warn("Google OAuth2 Token Client init error:", err);
+      }
+    };
+
+    if ((window as any).google?.accounts) {
+      setupGsi();
+    } else {
+      const timer = setInterval(() => {
+        if ((window as any).google?.accounts) {
+          clearInterval(timer);
+          setupGsi();
+        }
+      }, 200);
+      setTimeout(() => clearInterval(timer), 8000);
+    }
+  };
+
+  // Fetch backend config on mount
   useEffect(() => {
     api<{ google_client_id?: string }>("/auth/config")
       .then((cfg) => {
-        if (cfg.google_client_id && typeof window !== "undefined") {
-          const script = document.createElement("script");
-          script.src = "https://accounts.google.com/gsi/client";
-          script.async = true;
-          script.defer = true;
-          script.onload = () => {
-            /* eslint-disable @typescript-eslint/no-explicit-any */
-            const google = (window as any).google;
-            if (google?.accounts?.id) {
-              google.accounts.id.initialize({
-                client_id: cfg.google_client_id,
-                callback: async (response: { credential?: string }) => {
-                  if (response.credential) {
-                    setBusy(true);
-                    try {
-                      const user = await loginWithGoogle({ credential: response.credential });
-                      onAuthSuccess(user);
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : "Google authentication failed.");
-                    } finally {
-                      setBusy(false);
-                    }
-                  }
-                },
-              });
-            }
-          };
-          document.body.appendChild(script);
+        const id = cfg.google_client_id || localStorage.getItem("google_client_id") || "";
+        if (id) {
+          setGoogleClientId(id);
+          localStorage.setItem("google_client_id", id);
+          initGoogleAuth(id);
         }
       })
       .catch(() => {});
-  }, [onAuthSuccess]);
+  }, []);
 
+  // When clicking "Sign in with Google"
+  const handleGoogleSignInClick = () => {
+    setError("");
+
+    if (!googleClientId) {
+      // Prompt user/admin to connect Google OAuth Client ID
+      setConfigModalOpen(true);
+      return;
+    }
+
+    if (tokenClientRef.current) {
+      // Trigger Google's native popup showing all system Gmail accounts
+      try {
+        tokenClientRef.current.requestAccessToken({ prompt: "select_account" });
+      } catch (err) {
+        console.error("Failed to request Google access token:", err);
+        const google = (window as any).google;
+        if (google?.accounts?.id) {
+          google.accounts.id.prompt();
+        }
+      }
+    } else {
+      const google = (window as any).google;
+      if (google?.accounts?.id) {
+        google.accounts.id.prompt();
+      } else {
+        // Re-initialize and prompt
+        initGoogleAuth(googleClientId);
+        setError("Connecting to Google Identity Services… Please click again in a second.");
+      }
+    }
+  };
+
+  // Save custom Google Client ID
+  const handleSaveGoogleClientId = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const id = customClientIdInput.trim();
+    if (!id) return;
+
+    setSavingConfig(true);
+    setError("");
+    try {
+      await api("/auth/config/update", { google_client_id: id });
+      setGoogleClientId(id);
+      localStorage.setItem("google_client_id", id);
+      setConfigModalOpen(false);
+      initGoogleAuth(id);
+
+      // Launch Google account chooser immediately
+      setTimeout(() => {
+        const google = (window as any).google;
+        if (google?.accounts?.oauth2) {
+          const client = google.accounts.oauth2.initTokenClient({
+            client_id: id,
+            scope: "email profile openid",
+            prompt: "select_account",
+            callback: async (tokenResponse: any) => {
+              if (tokenResponse.access_token) {
+                setBusy(true);
+                try {
+                  const user = await loginWithGoogle({ access_token: tokenResponse.access_token });
+                  onAuthSuccess(user);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Google authentication failed.");
+                } finally {
+                  setBusy(false);
+                }
+              }
+            },
+          });
+          tokenClientRef.current = client;
+          client.requestAccessToken({ prompt: "select_account" });
+        }
+      }, 500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save Google Client ID.");
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
+  // Email & Password submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setBusy(true);
+
     try {
       let user: User;
       if (mode === "register") {
@@ -72,24 +231,6 @@ export default function AuthGateway({
       onAuthSuccess(user);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Authentication failed.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleGoogleLogin = async (gEmail: string, gName: string) => {
-    setBusy(true);
-    setError("");
-    setGoogleModalOpen(false);
-    try {
-      const user = await loginWithGoogle({
-        email: gEmail,
-        name: gName,
-        avatar: "https://lh3.googleusercontent.com/a/default-user=s96-c",
-      });
-      onAuthSuccess(user);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Google Sign-In failed.");
     } finally {
       setBusy(false);
     }
@@ -109,7 +250,7 @@ export default function AuthGateway({
       <div
         style={{
           width: "100%",
-          maxWidth: "980px",
+          maxWidth: "960px",
           display: "grid",
           gridTemplateColumns: "1.1fr 1fr",
           borderRadius: "18px",
@@ -119,7 +260,7 @@ export default function AuthGateway({
         }}
         className="auth-gateway-box"
       >
-        {/* Left Side: Brand & Feature Highlights */}
+        {/* Left Side: Platform Highlights */}
         <div
           style={{
             background: "#16382f",
@@ -175,18 +316,18 @@ export default function AuthGateway({
               🔒 AUTHENTICATED ACCESS ONLY
             </div>
 
-            <h1 style={{ fontSize: "28px", lineHeight: "1.3", color: "#f4f7f0", margin: "0 0 14px", fontWeight: 800 }}>
-              Unlock scholarship opportunities matching your profile.
+            <h1 style={{ fontSize: "27px", lineHeight: "1.3", color: "#f4f7f0", margin: "0 0 14px", fontWeight: 800 }}>
+              Unlock scholarship opportunities tailored to you.
             </h1>
 
-            <p style={{ fontSize: "14px", color: "#b0c9be", lineHeight: "1.7", margin: "0 0 28px" }}>
-              Sign in with your email or Google account to access our scholarship database, rule-based eligibility evaluation, and conversational AI assistant.
+            <p style={{ fontSize: "13px", color: "#b0c9be", lineHeight: "1.7", margin: "0 0 28px" }}>
+              Sign in with your Google or student account to access government scholarship databases, eligibility verification, and AI guidance.
             </p>
 
             {/* Highlights */}
-            <div style={{ display: "grid", gap: "14px" }}>
+            <div style={{ display: "grid", gap: "12px" }}>
               {[
-                { icon: "🎓", title: "16 Verified Scholarship Schemes", desc: "UGC, AICTE, and Ministry of Education scholarships with verified guidelines." },
+                { icon: "🎓", title: "16 Verified Scholarship Schemes", desc: "UGC, AICTE, and Ministry of Education schemes with verified guidelines." },
                 { icon: "✓", title: "Deterministic Eligibility Matcher", desc: "Checks course level, income thresholds, quotas, and merit criteria." },
                 { icon: "✦", title: "Evidence-Grounded AI Assistant", desc: "Ask questions and get answers cited directly from official scheme documents." },
               ].map((item, idx) => (
@@ -217,16 +358,16 @@ export default function AuthGateway({
           </div>
         </div>
 
-        {/* Right Side: Authentication Form */}
-        <div style={{ padding: "48px 40px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-          <div style={{ marginBottom: "24px" }}>
+        {/* Right Side: Product-Ready Authentication Form */}
+        <div style={{ padding: "44px 38px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+          <div style={{ marginBottom: "22px" }}>
             <h2 style={{ fontSize: "22px", margin: "0 0 6px", color: "#1f382e" }}>
-              {mode === "login" ? "Student Sign In" : "Register Student Account"}
+              {mode === "login" ? "Student Sign In" : "Create Student Account"}
             </h2>
             <p style={{ fontSize: "13px", color: "#6d7d74", margin: 0 }}>
               {mode === "login"
-                ? "Enter your credentials or use Google to enter the application."
-                : "Create your student account to get started."}
+                ? "Sign in using your Google account or email credentials."
+                : "Register your student credentials to access your dashboard."}
             </p>
           </div>
 
@@ -238,7 +379,7 @@ export default function AuthGateway({
               background: "#edf1ea",
               padding: "4px",
               borderRadius: "10px",
-              marginBottom: "22px",
+              marginBottom: "20px",
             }}
           >
             <button
@@ -256,6 +397,7 @@ export default function AuthGateway({
                 background: mode === "login" ? "#fff" : "transparent",
                 color: mode === "login" ? "#1f382e" : "#728379",
                 boxShadow: mode === "login" ? "0 2px 6px rgba(0,0,0,0.06)" : "none",
+                cursor: "pointer",
               }}
             >
               Sign In
@@ -275,6 +417,7 @@ export default function AuthGateway({
                 background: mode === "register" ? "#fff" : "transparent",
                 color: mode === "register" ? "#1f382e" : "#728379",
                 boxShadow: mode === "register" ? "0 2px 6px rgba(0,0,0,0.06)" : "none",
+                cursor: "pointer",
               }}
             >
               Create Account
@@ -286,20 +429,84 @@ export default function AuthGateway({
             <div
               className="error"
               role="alert"
-              style={{ marginBottom: "18px", fontSize: "12px", padding: "10px 14px", borderRadius: "8px" }}
+              style={{ marginBottom: "16px", fontSize: "12px", padding: "10px 14px", borderRadius: "8px" }}
             >
               {error}
             </div>
           )}
 
-          {/* Form */}
+          {/* Google Sign-In Primary Button */}
+          <button
+            type="button"
+            onClick={handleGoogleSignInClick}
+            disabled={busy}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "12px",
+              padding: "12px 18px",
+              borderRadius: "8px",
+              border: "1px solid #c8d3ca",
+              background: "#fff",
+              color: "#1e372e",
+              fontSize: "14px",
+              fontWeight: 600,
+              cursor: busy ? "wait" : "pointer",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+              marginBottom: "12px",
+            }}
+          >
+            <svg width="19" height="19" viewBox="0 0 48 48">
+              <path
+                fill="#EA4335"
+                d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
+              />
+              <path
+                fill="#4285F4"
+                d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
+              />
+              <path
+                fill="#34A853"
+                d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
+              />
+            </svg>
+            <span>Sign in with Google</span>
+          </button>
+
+          {/* Official Google Button Render Mount (when client_id initialized) */}
+          <div ref={googleBtnContainerRef} style={{ display: "none" }} />
+
+          {/* Divider */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              margin: "16px 0",
+              color: "#9ca7a0",
+              fontSize: "11px",
+              letterSpacing: "1px",
+              fontWeight: 700,
+            }}
+          >
+            <div style={{ flex: 1, height: "1px", background: "#e5ece4" }} />
+            <span style={{ padding: "0 12px" }}>OR CONTINUE WITH EMAIL</span>
+            <div style={{ flex: 1, height: "1px", background: "#e5ece4" }} />
+          </div>
+
+          {/* Email / Password Form */}
           <form onSubmit={handleSubmit}>
             {mode === "register" && (
-              <label style={{ marginBottom: "14px", display: "grid", gap: "6px" }}>
+              <label style={{ marginBottom: "12px", display: "grid", gap: "6px" }}>
                 <span style={{ fontSize: "12px", fontWeight: 600, color: "#365145" }}>Full Name</span>
                 <input
                   type="text"
-                  placeholder="e.g. Ananya Sharma"
+                  placeholder="e.g. Student Name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
@@ -308,11 +515,11 @@ export default function AuthGateway({
               </label>
             )}
 
-            <label style={{ marginBottom: "14px", display: "grid", gap: "6px" }}>
+            <label style={{ marginBottom: "12px", display: "grid", gap: "6px" }}>
               <span style={{ fontSize: "12px", fontWeight: 600, color: "#365145" }}>Email Address</span>
               <input
                 type="email"
-                placeholder="student@example.com"
+                placeholder="name@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -321,7 +528,7 @@ export default function AuthGateway({
               />
             </label>
 
-            <label style={{ marginBottom: "20px", display: "grid", gap: "6px" }}>
+            <label style={{ marginBottom: "18px", display: "grid", gap: "6px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: "12px", fontWeight: 600, color: "#365145" }}>Password</span>
                 <button
@@ -342,7 +549,7 @@ export default function AuthGateway({
               </div>
               <input
                 type={showPassword ? "text" : "password"}
-                placeholder={mode === "register" ? "At least 6 characters" : "Enter your password"}
+                placeholder={mode === "register" ? "At least 6 characters" : "Your password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -363,75 +570,14 @@ export default function AuthGateway({
                 borderRadius: "8px",
               }}
             >
-              {busy ? "Authenticating…" : mode === "login" ? "Sign In & Enter Application →" : "Register & Enter Application →"}
+              {busy ? "Authenticating…" : mode === "login" ? "Sign In & Enter Dashboard →" : "Create Account & Enter →"}
             </button>
           </form>
-
-          {/* Divider */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              margin: "20px 0",
-              color: "#9ca7a0",
-              fontSize: "11px",
-              letterSpacing: "1px",
-              fontWeight: 700,
-            }}
-          >
-            <div style={{ flex: 1, height: "1px", background: "#e5ece4" }} />
-            <span style={{ padding: "0 12px" }}>OR CONTINUE WITH</span>
-            <div style={{ flex: 1, height: "1px", background: "#e5ece4" }} />
-          </div>
-
-          {/* Google Sign-In Button */}
-          <button
-            type="button"
-            onClick={() => setGoogleModalOpen(true)}
-            disabled={busy}
-            style={{
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "12px",
-              padding: "12px 18px",
-              borderRadius: "8px",
-              border: "1px solid #d4ddd5",
-              background: "#fff",
-              color: "#293e36",
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: "pointer",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-            }}
-          >
-            {/* Google Multicolor Logo */}
-            <svg width="18" height="18" viewBox="0 0 48 48">
-              <path
-                fill="#EA4335"
-                d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-              />
-              <path
-                fill="#4285F4"
-                d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-              />
-              <path
-                fill="#34A853"
-                d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-              />
-            </svg>
-            Sign in with Google
-          </button>
         </div>
       </div>
 
-      {/* Google Account Selector Dialog */}
-      {googleModalOpen && (
+      {/* Google OAuth Setup Dialog (appears if no client_id is configured) */}
+      {configModalOpen && (
         <div
           style={{
             position: "fixed",
@@ -443,21 +589,21 @@ export default function AuthGateway({
             padding: "20px",
             zIndex: 1000,
           }}
-          onClick={() => setGoogleModalOpen(false)}
+          onClick={() => setConfigModalOpen(false)}
         >
           <div
             className="panel"
             style={{
-              maxWidth: "420px",
+              maxWidth: "460px",
               width: "100%",
               padding: "28px",
               background: "#fff",
               borderRadius: "14px",
-              boxShadow: "0 12px 32px rgba(0,0,0,0.22)",
+              boxShadow: "0 16px 40px rgba(0,0,0,0.25)",
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
               <svg width="22" height="22" viewBox="0 0 48 48">
                 <path
                   fill="#EA4335"
@@ -476,96 +622,65 @@ export default function AuthGateway({
                   d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
                 />
               </svg>
-              <h3 style={{ margin: 0, fontSize: "17px", color: "#223b32" }}>Sign in with Google</h3>
+              <h3 style={{ margin: 0, fontSize: "17px", color: "#223b32" }}>Connect Google Sign-In</h3>
             </div>
-            <p style={{ fontSize: "12px", color: "#61726a", marginBottom: "16px" }}>
-              Choose a student account or enter your Google email to authenticate:
+
+            <p style={{ fontSize: "13px", color: "#54685e", lineHeight: "1.6", marginBottom: "16px" }}>
+              To open Google’s account chooser showing all Gmail accounts on this system, please provide your Google Cloud OAuth Client ID:
             </p>
 
-            <div style={{ display: "grid", gap: "8px", marginBottom: "16px" }}>
-              {[
-                { name: "Ananya Sharma", email: "ananya.sharma@gmail.com" },
-                { name: "Rahul Verma", email: "rahul.verma@gmail.com" },
-                { name: "Student Scholar", email: "scholar.student@gmail.com" },
-              ].map((acc) => (
-                <button
-                  key={acc.email}
-                  type="button"
-                  onClick={() => handleGoogleLogin(acc.email, acc.name)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "12px",
-                    padding: "10px 14px",
-                    borderRadius: "8px",
-                    border: "1px solid #e1e7de",
-                    background: "#f9faf7",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    width: "100%",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: "32px",
-                      height: "32px",
-                      borderRadius: "50%",
-                      background: "#326657",
-                      color: "#fff",
-                      display: "grid",
-                      placeItems: "center",
-                      fontWeight: 700,
-                      fontSize: "13px",
-                    }}
-                  >
-                    {acc.name[0]}
-                  </div>
-                  <div>
-                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#263f35" }}>{acc.name}</div>
-                    <div style={{ fontSize: "11px", color: "#74847b" }}>{acc.email}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            <div style={{ borderTop: "1px solid #edf1eb", paddingTop: "14px", marginBottom: "14px" }}>
-              <label style={{ display: "grid", gap: "6px", marginBottom: "10px" }}>
-                <span style={{ fontSize: "11px", fontWeight: 600, color: "#365145" }}>Your Google Email</span>
-                <input
-                  type="email"
-                  placeholder="yourname@gmail.com"
-                  value={googleCustomEmail}
-                  onChange={(e) => setGoogleCustomEmail(e.target.value)}
-                />
-              </label>
-              <label style={{ display: "grid", gap: "6px", marginBottom: "14px" }}>
-                <span style={{ fontSize: "11px", fontWeight: 600, color: "#365145" }}>Your Name (Optional)</span>
+            <form onSubmit={handleSaveGoogleClientId}>
+              <label style={{ display: "grid", gap: "6px", marginBottom: "12px" }}>
+                <span style={{ fontSize: "11px", fontWeight: 600, color: "#365145" }}>
+                  Google OAuth 2.0 Web Client ID
+                </span>
                 <input
                   type="text"
-                  placeholder="e.g. John Doe"
-                  value={googleCustomName}
-                  onChange={(e) => setGoogleCustomName(e.target.value)}
+                  placeholder="e.g. 123456789-abcdef.apps.googleusercontent.com"
+                  value={customClientIdInput}
+                  onChange={(e) => setCustomClientIdInput(e.target.value)}
+                  required
+                  autoFocus
                 />
               </label>
-              <button
-                type="button"
-                className="button primary"
-                disabled={!googleCustomEmail.trim()}
-                onClick={() => handleGoogleLogin(googleCustomEmail.trim(), googleCustomName.trim())}
-                style={{ width: "100%", justifyContent: "center" }}
-              >
-                Sign In with this Google Account
-              </button>
-            </div>
 
-            <button
-              type="button"
-              className="button subtle"
-              onClick={() => setGoogleModalOpen(false)}
-              style={{ width: "100%", justifyContent: "center", padding: "8px" }}
-            >
-              Cancel
-            </button>
+              <div
+                style={{
+                  background: "#f4f8f2",
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  fontSize: "11px",
+                  color: "#476152",
+                  lineHeight: "1.5",
+                  marginBottom: "16px",
+                }}
+              >
+                <strong>Setup Steps in Google Cloud:</strong>
+                <ol style={{ margin: "4px 0 0", paddingLeft: "18px" }}>
+                  <li>Go to Google Cloud Console &gt; APIs &amp; Services &gt; Credentials</li>
+                  <li>Create OAuth Client ID (Web Application)</li>
+                  <li>Set Authorized JavaScript Origin to <code>http://localhost:5173</code></li>
+                </ol>
+              </div>
+
+              <div style={{ display: "flex", gap: "10px" }}>
+                <button
+                  type="submit"
+                  className="button primary"
+                  disabled={savingConfig || !customClientIdInput.trim()}
+                  style={{ flex: 1, justifyContent: "center" }}
+                >
+                  {savingConfig ? "Saving…" : "Save & Launch Google Sign-In →"}
+                </button>
+                <button
+                  type="button"
+                  className="button subtle"
+                  onClick={() => setConfigModalOpen(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

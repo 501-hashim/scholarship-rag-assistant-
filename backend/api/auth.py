@@ -1,8 +1,10 @@
 """Authentication handlers for student email/password and Google Sign-In."""
 
 import os
+import re
 from typing import Optional
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
@@ -29,9 +31,14 @@ class LoginRequest(BaseModel):
 
 class GoogleAuthRequest(BaseModel):
     credential: Optional[str] = None  # Google ID token if sent via GSI
+    access_token: Optional[str] = None  # Google OAuth2 Access Token
     email: Optional[str] = None
     name: Optional[str] = None
     avatar: Optional[str] = None
+
+
+class AuthConfigUpdateRequest(BaseModel):
+    google_client_id: str = Field(..., min_length=3, max_length=256)
 
 
 def generate_token(user: User, provider: str = "password", avatar: str = "") -> str:
@@ -81,7 +88,6 @@ def register(request, payload):
             status=400,
         )
 
-    # Use email as unique username (or slugify if special chars)
     username = email[:150]
     if User.objects.filter(username=username).exists():
         username = f"{email[:130]}_{User.objects.count() + 1}"
@@ -152,7 +158,6 @@ def google_auth(request, payload):
         try:
             import httpx
 
-            # Verify with Google's official tokeninfo endpoint
             resp = httpx.get(
                 "https://oauth2.googleapis.com/tokeninfo",
                 params={"id_token": payload.credential},
@@ -165,7 +170,31 @@ def google_auth(request, payload):
                 avatar = data.get("picture", "")
             else:
                 return Response(
-                    {"error": {"code": "INVALID_GOOGLE_TOKEN", "message": "Failed to verify Google token."}},
+                    {"error": {"code": "INVALID_GOOGLE_TOKEN", "message": "Failed to verify Google ID token."}},
+                    status=401,
+                )
+        except Exception as e:
+            return Response(
+                {"error": {"code": "GOOGLE_VERIFY_ERROR", "message": f"Google verification error: {str(e)}"}},
+                status=400,
+            )
+    elif payload.access_token:
+        try:
+            import httpx
+
+            resp = httpx.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {payload.access_token}"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                email = data.get("email", "").lower().strip()
+                name = data.get("name") or data.get("given_name") or email.split("@")[0]
+                avatar = data.get("picture", "")
+            else:
+                return Response(
+                    {"error": {"code": "INVALID_GOOGLE_TOKEN", "message": "Failed to verify Google access token."}},
                     status=401,
                 )
         except Exception as e:
@@ -174,7 +203,6 @@ def google_auth(request, payload):
                 status=400,
             )
     elif payload.email:
-        # Development / modal Google sign in with verified email
         email = payload.email.lower().strip()
         try:
             validate_email(email)
@@ -187,7 +215,7 @@ def google_auth(request, payload):
         avatar = payload.avatar or ""
     else:
         return Response(
-            {"error": {"code": "MISSING_INFO", "message": "Either credential or email is required for Google Sign-In."}},
+            {"error": {"code": "MISSING_INFO", "message": "Either credential, access_token, or email is required for Google Sign-In."}},
             status=400,
         )
 
@@ -197,7 +225,6 @@ def google_auth(request, payload):
             status=400,
         )
 
-    # Find or create user
     user = User.objects.filter(email__iexact=email).first()
     if not user:
         username = email[:150]
@@ -264,6 +291,37 @@ def auth_config(request, payload=None):
     return Response(
         {
             "google_client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
+            "providers": ["password", "google"],
+        }
+    )
+
+
+@endpoint("POST", AuthConfigUpdateRequest)
+def update_auth_config(request, payload):
+    client_id = payload.google_client_id.strip()
+    os.environ["GOOGLE_CLIENT_ID"] = client_id
+
+    env_path = os.path.join(settings.BASE_DIR.parent, ".env")
+    if not os.path.exists(env_path):
+        env_path = os.path.join(settings.BASE_DIR, ".env")
+
+    if os.path.exists(env_path):
+        try:
+            with open(env_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            if "GOOGLE_CLIENT_ID=" in content:
+                content = re.sub(r"GOOGLE_CLIENT_ID=.*", f"GOOGLE_CLIENT_ID={client_id}", content)
+            else:
+                content = content.rstrip() + f"\nGOOGLE_CLIENT_ID={client_id}\n"
+            with open(env_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(content)
+        except Exception:
+            pass
+
+    return Response(
+        {
+            "status": "success",
+            "google_client_id": client_id,
             "providers": ["password", "google"],
         }
     )

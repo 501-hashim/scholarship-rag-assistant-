@@ -49,6 +49,7 @@ export async function registerWithEmail(
 
 export async function loginWithGoogle(payload: {
   credential?: string;
+  access_token?: string;
   email?: string;
   name?: string;
   avatar?: string;

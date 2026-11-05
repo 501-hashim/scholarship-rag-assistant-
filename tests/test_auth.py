@@ -13,33 +13,33 @@ def client():
 def test_register_success_and_login(client):
     reg_res = client.post(
         "/api/auth/register",
-        {"name": "Ananya Sharma", "email": "ananya@example.com", "password": "SecurePassword123!"},
+        {"name": "Real Student", "email": "student@example.com", "password": "SecurePassword123!"},
         format="json",
     )
     assert reg_res.status_code == 201
     data = reg_res.json()
     assert data["status"] == "success"
     assert "token" in data
-    assert data["user"]["email"] == "ananya@example.com"
-    assert data["user"]["name"] == "Ananya Sharma"
+    assert data["user"]["email"] == "student@example.com"
+    assert data["user"]["name"] == "Real Student"
 
     # Login with the newly registered user
     login_res = client.post(
         "/api/auth/login",
-        {"email": "ananya@example.com", "password": "SecurePassword123!"},
+        {"email": "student@example.com", "password": "SecurePassword123!"},
         format="json",
     )
     assert login_res.status_code == 200
     login_data = login_res.json()
     assert login_data["status"] == "success"
-    assert login_data["user"]["email"] == "ananya@example.com"
+    assert login_data["user"]["email"] == "student@example.com"
 
     # Verify /api/auth/me using the token
     token = login_data["token"]
     me_res = client.get("/api/auth/me", HTTP_AUTHORIZATION=f"Bearer {token}")
     assert me_res.status_code == 200
     assert me_res.json()["authenticated"] is True
-    assert me_res.json()["user"]["email"] == "ananya@example.com"
+    assert me_res.json()["user"]["email"] == "student@example.com"
 
 
 def test_register_duplicate_email_rejected(client):
@@ -60,12 +60,12 @@ def test_register_duplicate_email_rejected(client):
 def test_login_invalid_password(client):
     client.post(
         "/api/auth/register",
-        {"name": "Rahul Kumar", "email": "rahul@example.com", "password": "CorrectPassword123!"},
+        {"name": "Sample Student", "email": "testlogin@example.com", "password": "CorrectPassword123!"},
         format="json",
     )
     res = client.post(
         "/api/auth/login",
-        {"email": "rahul@example.com", "password": "WrongPassword!"},
+        {"email": "testlogin@example.com", "password": "WrongPassword!"},
         format="json",
     )
     assert res.status_code == 401
@@ -106,3 +106,15 @@ def test_auth_config(client):
     res = client.get("/api/auth/config")
     assert res.status_code == 200
     assert "providers" in res.json()
+
+
+def test_update_auth_config(client):
+    res = client.post(
+        "/api/auth/config/update",
+        {"google_client_id": "test-12345.apps.googleusercontent.com"},
+        format="json",
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "success"
+    assert data["google_client_id"] == "test-12345.apps.googleusercontent.com"

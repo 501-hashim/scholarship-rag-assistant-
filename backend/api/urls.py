@@ -9,6 +9,7 @@ urlpatterns = [
     path("auth/google", auth.google_auth),
     path("auth/me", auth.me),
     path("auth/config", auth.auth_config),
+    path("auth/config/update", auth.update_auth_config),
 
     # Assistant & RAG
     path("rag/query", assistant.rag_query),
