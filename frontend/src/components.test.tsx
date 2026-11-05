@@ -4,8 +4,13 @@ import { Source } from "./components";
 import Dashboard from "./Dashboard";
 import Assistant from "./Assistant";
 import EligibilityChecker from "./EligibilityChecker";
+import SignIn from "./SignIn";
 import { api } from "./api";
-vi.mock("./api", () => ({ api: vi.fn() }));
+vi.mock("./api", () => ({
+  api: vi.fn(),
+  getAuthToken: vi.fn(() => null),
+  setAuthToken: vi.fn(),
+}));
 const citation = {
   scheme_id: "pragati",
   scheme_name: "Pragati Scholarship",
@@ -182,5 +187,24 @@ describe("sources and immediate assistant access", () => {
     expect(await screen.findByText("Pragati Scholarship Scheme For Girl Students (Technical Degree)")).toBeInTheDocument();
     expect(screen.getByText("Fully Eligible")).toBeInTheDocument();
     expect(screen.getByText("Gender is Female.")).toBeInTheDocument();
+  });
+  it("renders student sign in interface with email, password, and google sign in", async () => {
+    vi.mocked(api).mockResolvedValue({ google_client_id: "" });
+    render(<SignIn />);
+    expect(screen.getByRole("heading", { name: "Student Sign In" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("student@example.com")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Enter your password")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sign in with Google/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sign In with Email/ })).toBeInTheDocument();
+
+    // Switch to Create Account
+    fireEvent.click(screen.getByRole("button", { name: "Create Account" }));
+    expect(screen.getByRole("heading", { name: "Create Student Account" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("e.g. Ananya Sharma")).toBeInTheDocument();
+
+    // Click Google Sign-in to open Google account selector modal
+    fireEvent.click(screen.getByRole("button", { name: /Sign in with Google/ }));
+    expect(screen.getByText("Choose a Google student account or enter your Google email to authenticate:")).toBeInTheDocument();
+    expect(screen.getByText("Ananya Sharma")).toBeInTheDocument();
   });
 });

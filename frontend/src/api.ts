@@ -1,5 +1,25 @@
 const BASE = import.meta.env.VITE_API_BASE || "";
 
+export function getAuthToken(): string | null {
+  try {
+    return localStorage.getItem("scholar_auth_token");
+  } catch {
+    return null;
+  }
+}
+
+export function setAuthToken(token: string | null): void {
+  try {
+    if (token) {
+      localStorage.setItem("scholar_auth_token", token);
+    } else {
+      localStorage.removeItem("scholar_auth_token");
+    }
+  } catch {
+    // Ignore localStorage errors
+  }
+}
+
 export async function api<T>(
   path: string,
   body?: unknown,
@@ -8,12 +28,14 @@ export async function api<T>(
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 120000);
+  const authToken = getAuthToken();
   try {
     const response = await fetch(BASE + "/api" + path, {
       method: method || (body === undefined ? "GET" : "POST"),
       headers: {
         "Content-Type": "application/json",
         ...(token ? { "X-Session-Token": token } : {}),
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,

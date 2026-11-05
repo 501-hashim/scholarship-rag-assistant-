@@ -179,7 +179,7 @@ export default function EligibilityChecker() {
       // Scroll smoothly down to results
       setTimeout(() => {
         const el = document.getElementById("eligibility-results");
-        if (el) el.scrollIntoView({ behavior: "smooth" });
+        if (el && typeof el.scrollIntoView === "function") { el.scrollIntoView({ behavior: "smooth" }); }
       }, 100);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to evaluate eligibility.");

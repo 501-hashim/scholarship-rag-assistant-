@@ -80,3 +80,17 @@ export type EligibilityCheckResponse = {
   not_eligible: MatchResultItem[];
   all_results: MatchResultItem[];
 };
+
+export type User = {
+  id: number;
+  email: string;
+  name: string;
+  provider: "password" | "google";
+  avatar?: string;
+};
+
+export type AuthResponse = {
+  status: "success";
+  token: string;
+  user: User;
+};
