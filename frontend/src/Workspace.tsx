@@ -17,7 +17,7 @@ export default function Workspace({
 }) {
   const userInitial = currentUser?.name
     ? currentUser.name.trim()[0].toUpperCase()
-    : "G";
+    : "S";
 
   return (
     <div className="shell">
@@ -35,11 +35,6 @@ export default function Workspace({
             ["/eligibility", "✓", "Check Eligibility"],
             ["/scholarships", "▤", "Scholarships"],
             ["/assistant", "✦", "AI assistant"],
-            [
-              "/signin",
-              "👤",
-              currentUser ? "Student Profile" : "Sign In / Register",
-            ],
           ].map(([path, icon, label]) => (
             <a
               key={path}
@@ -54,7 +49,6 @@ export default function Workspace({
               {label}
               {label === "AI assistant" && <small>ASK</small>}
               {label === "Check Eligibility" && <small>NEW</small>}
-              {path === "/signin" && !currentUser && <small>AUTH</small>}
             </a>
           ))}
         </nav>
@@ -67,8 +61,8 @@ export default function Workspace({
           <span
             className="avatar"
             style={{
-              background: currentUser ? "#204c3c" : "#e5eadc",
-              color: currentUser ? "#e1eed6" : "#243f34",
+              background: "#204c3c",
+              color: "#e1eed6",
               fontWeight: 700,
             }}
           >
@@ -83,7 +77,7 @@ export default function Workspace({
                 display: "block",
               }}
             >
-              {currentUser ? currentUser.name : "Guest Student"}
+              {currentUser?.name || "Authenticated Student"}
             </strong>
             <small
               style={{
@@ -93,10 +87,10 @@ export default function Workspace({
                 display: "block",
               }}
             >
-              {currentUser ? currentUser.email : "Not signed in"}
+              {currentUser?.email || "Student"}
             </small>
           </div>
-          {currentUser ? (
+          {onLogout && (
             <button
               type="button"
               onClick={onLogout}
@@ -111,20 +105,8 @@ export default function Workspace({
               }}
               title="Sign Out"
             >
-              Exit
+              Sign Out
             </button>
-          ) : (
-            <a
-              href="#/signin"
-              style={{
-                fontSize: "11px",
-                fontWeight: 600,
-                color: "#285d48",
-                textDecoration: "none",
-              }}
-            >
-              Login
-            </a>
           )}
         </div>
       </aside>
@@ -135,14 +117,14 @@ export default function Workspace({
             <span className="data-label">
               <i /> Dataset grounded
             </span>
-            {currentUser ? (
+            {currentUser && (
               <div
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: "10px",
                   background: "#eef3ea",
-                  padding: "6px 12px",
+                  padding: "6px 14px",
                   borderRadius: "20px",
                   fontSize: "12px",
                 }}
@@ -153,35 +135,25 @@ export default function Workspace({
                 <span style={{ color: "#77877e", fontSize: "11px" }}>
                   ({currentUser.provider === "google" ? "Google" : "Email"})
                 </span>
-                <button
-                  type="button"
-                  onClick={onLogout}
-                  style={{
-                    border: 0,
-                    background: "transparent",
-                    color: "#a93226",
-                    fontSize: "11px",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    padding: 0,
-                  }}
-                >
-                  Sign Out
-                </button>
+                {onLogout && (
+                  <button
+                    type="button"
+                    onClick={onLogout}
+                    style={{
+                      border: 0,
+                      background: "transparent",
+                      color: "#a93226",
+                      fontSize: "11px",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      padding: 0,
+                      marginLeft: "4px",
+                    }}
+                  >
+                    Sign Out
+                  </button>
+                )}
               </div>
-            ) : (
-              <a
-                className="button primary"
-                href="#/signin"
-                style={{
-                  fontSize: "11px",
-                  padding: "7px 14px",
-                  borderRadius: "6px",
-                  gap: "6px",
-                }}
-              >
-                Sign In / Register ↗
-              </a>
             )}
           </div>
         </header>

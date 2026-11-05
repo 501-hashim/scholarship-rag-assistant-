@@ -5,12 +5,16 @@ import Dashboard from "./Dashboard";
 import Assistant from "./Assistant";
 import EligibilityChecker from "./EligibilityChecker";
 import SignIn from "./SignIn";
+import AuthGateway from "./AuthGateway";
+import App from "./App";
 import { api } from "./api";
+
 vi.mock("./api", () => ({
   api: vi.fn(),
   getAuthToken: vi.fn(() => null),
   setAuthToken: vi.fn(),
 }));
+
 const citation = {
   scheme_id: "pragati",
   scheme_name: "Pragati Scholarship",
@@ -18,10 +22,13 @@ const citation = {
   source_url: null,
   retrieved_from: "pragati:benefits:0",
 };
+
 beforeEach(() => {
   sessionStorage.clear();
+  localStorage.clear();
   vi.mocked(api).mockReset();
 });
+
 describe("sources and immediate assistant access", () => {
   it("shows the relevant scholarship name and preserves missing URLs", () => {
     render(<Source citation={citation} />);
@@ -36,6 +43,7 @@ describe("sources and immediate assistant access", () => {
       screen.queryByRole("link", { name: "Official source" }),
     ).not.toBeInTheDocument();
   });
+
   it("rejects unsafe source URL protocols", () => {
     render(
       <Source citation={{ ...citation, source_url: "javascript:alert(1)" }} />,
@@ -47,6 +55,7 @@ describe("sources and immediate assistant access", () => {
       screen.queryByRole("link", { name: "Official source" }),
     ).not.toBeInTheDocument();
   });
+
   it("allows ordinary official source links", () => {
     render(
       <Source
@@ -60,6 +69,7 @@ describe("sources and immediate assistant access", () => {
       screen.getByRole("link", { name: "Official source" }),
     ).toHaveAttribute("href", "https://example.org/scholarship");
   });
+
   it("opens scholarship questions without a profile workflow", () => {
     render(<Dashboard schemes={[]} />);
     expect(
@@ -70,6 +80,7 @@ describe("sources and immediate assistant access", () => {
       screen.queryByText("Confirmed rule matches"),
     ).not.toBeInTheDocument();
   });
+
   it("renders actual generated prose and sends no profile", async () => {
     vi.mocked(api).mockResolvedValueOnce({
       session_id: "session",
@@ -101,6 +112,7 @@ describe("sources and immediate assistant access", () => {
       session_id: "session",
     });
   });
+
   it("shows provider failures clearly instead of fake AI excerpts", async () => {
     vi.mocked(api).mockResolvedValueOnce({
       session_id: "session",
@@ -124,6 +136,7 @@ describe("sources and immediate assistant access", () => {
       screen.queryByText("Showing verified dataset excerpts."),
     ).not.toBeInTheDocument();
   });
+
   it("passes selected scholarship context without forcing a hard filter", async () => {
     vi.mocked(api).mockResolvedValueOnce({
       session_id: "session",
@@ -149,6 +162,7 @@ describe("sources and immediate assistant access", () => {
       context_scheme_id: "selected-scholarship",
     });
   });
+
   it("renders eligibility checker form and submits student profile", async () => {
     vi.mocked(api).mockResolvedValueOnce({
       summary: {
@@ -188,6 +202,7 @@ describe("sources and immediate assistant access", () => {
     expect(screen.getByText("Fully Eligible")).toBeInTheDocument();
     expect(screen.getByText("Gender is Female.")).toBeInTheDocument();
   });
+
   it("renders student sign in interface with email, password, and google sign in", async () => {
     vi.mocked(api).mockResolvedValue({ google_client_id: "" });
     render(<SignIn />);
@@ -206,5 +221,32 @@ describe("sources and immediate assistant access", () => {
     fireEvent.click(screen.getByRole("button", { name: /Sign in with Google/ }));
     expect(screen.getByText("Choose a Google student account or enter your Google email to authenticate:")).toBeInTheDocument();
     expect(screen.getByText("Ananya Sharma")).toBeInTheDocument();
+  });
+
+  it("renders standalone AuthGateway when user is not authenticated", async () => {
+    vi.mocked(api).mockResolvedValue({ google_client_id: "" });
+    const onAuthSuccess = vi.fn();
+    render(<AuthGateway onAuthSuccess={onAuthSuccess} />);
+
+    expect(screen.getByText("STUDENT PORTAL")).toBeInTheDocument();
+    expect(screen.getByText("🔒 AUTHENTICATED ACCESS ONLY")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Student Sign In" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("student@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Sign in with Google/ })).toBeInTheDocument();
+
+    // Switch to register tab
+    fireEvent.click(screen.getByRole("button", { name: "Create Account" }));
+    expect(screen.getByRole("heading", { name: "Register Student Account" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("e.g. Ananya Sharma")).toBeInTheDocument();
+  });
+
+  it("gates application workspace so only signed-in candidates can view it", async () => {
+    vi.mocked(api).mockResolvedValue({ google_client_id: "" });
+    render(<App />);
+
+    // Initially unauthenticated: renders AuthGateway, not main workspace
+    expect(screen.getByText("STUDENT PORTAL")).toBeInTheDocument();
+    expect(screen.getByText("🔒 AUTHENTICATED ACCESS ONLY")).toBeInTheDocument();
+    expect(screen.queryByText("STUDENT WORKSPACE")).not.toBeInTheDocument();
   });
 });

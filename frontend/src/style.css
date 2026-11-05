@@ -1007,3 +1007,9 @@ summary {
     font-size: 8px;
   }
 }
+
+@media (max-width: 800px) {
+  .auth-gateway-box {
+    grid-template-columns: 1fr !important;
+  }
+}
