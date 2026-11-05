@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { Source } from "./components";
 import Dashboard from "./Dashboard";
 import Assistant from "./Assistant";
+import EligibilityChecker from "./EligibilityChecker";
 import { api } from "./api";
 vi.mock("./api", () => ({ api: vi.fn() }));
 const citation = {
@@ -142,5 +143,44 @@ describe("sources and immediate assistant access", () => {
       session_id: "session",
       context_scheme_id: "selected-scholarship",
     });
+  });
+  it("renders eligibility checker form and submits student profile", async () => {
+    vi.mocked(api).mockResolvedValueOnce({
+      summary: {
+        total_schemes: 16,
+        eligible_count: 1,
+        needs_verification_count: 2,
+        not_eligible_count: 13,
+      },
+      eligible: [
+        {
+          scheme_id: "pragati_scholarship_scheme_for_girl_students_technical_degree",
+          scheme_name: "Pragati Scholarship Scheme For Girl Students (Technical Degree)",
+          provider: "AICTE",
+          status: "eligible",
+          objective: "To support technical education for girls",
+          benefits_summary: "₹50,000 per annum",
+          matched_rules: ["Gender is Female.", "Enrolled in technical degree discipline."],
+          failed_rules: [],
+          missing_information: [],
+          verification_notes: ["Host institution must be AICTE-approved."],
+        },
+      ],
+      needs_verification: [],
+      not_eligible: [],
+      all_results: [],
+    });
+    render(<EligibilityChecker />);
+    expect(screen.getByText("Scholarship Eligibility Matcher")).toBeInTheDocument();
+    expect(screen.getByText("1. Identity & Demographic Details")).toBeInTheDocument();
+    expect(screen.getByText("2. Socio-Economic & Caste Category")).toBeInTheDocument();
+    expect(screen.getByText("3. Academic & Course Details")).toBeInTheDocument();
+
+    const submitBtn = screen.getByRole("button", { name: /Find Matching Scholarships/ });
+    fireEvent.click(submitBtn);
+
+    expect(await screen.findByText("Pragati Scholarship Scheme For Girl Students (Technical Degree)")).toBeInTheDocument();
+    expect(screen.getByText("Fully Eligible")).toBeInTheDocument();
+    expect(screen.getByText("Gender is Female.")).toBeInTheDocument();
   });
 });

@@ -7,6 +7,8 @@ urlpatterns = [
     path("agent/query", assistant.agent_query),
     path("scholarships/search", views.scholarship_search),
     path("scholarships/<str:scheme_id>", views.scholarship_detail),
+    path("eligibility/check", views.eligibility_check),
+    path("scholarships/match", views.eligibility_check),
     path("sessions", views.sessions_create),
     path("sessions/<str:session_id>", views.sessions_detail),
     path("health", views.health),

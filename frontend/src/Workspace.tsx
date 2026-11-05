@@ -23,6 +23,7 @@ export default function Workspace({
         <nav aria-label="Main navigation">
           {[
             ["/", "◫", "Overview"],
+            ["/eligibility", "✓", "Check Eligibility"],
             ["/scholarships", "▤", "Scholarships"],
             ["/assistant", "✦", "AI assistant"],
           ].map(([path, icon, label]) => (
@@ -38,6 +39,7 @@ export default function Workspace({
               <span aria-hidden="true">{icon}</span>
               {label}
               {label === "AI assistant" && <small>ASK</small>}
+              {label === "Check Eligibility" && <small>NEW</small>}
             </a>
           ))}
         </nav>

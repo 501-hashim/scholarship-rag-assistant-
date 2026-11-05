@@ -12,7 +12,7 @@ def client():
 
 def test_removed_profile_routes_and_preserved_scholarship_data(client):
     assert client.post("/api/profile/validate", {}, format="json").status_code == 404
-    assert client.post("/api/eligibility/check", {"profile": {}}, format="json").status_code == 404
+    assert client.post("/api/eligibility/check", {}, format="json").status_code == 200
     search = client.post("/api/scholarships/search", {"category": "OBC"}, format="json")
     assert any("yasasvi" in s["scheme_id"] for s in search.json()["results"])
     sid = records()[0]["scheme_id"]

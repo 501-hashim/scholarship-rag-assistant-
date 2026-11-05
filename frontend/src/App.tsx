@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import Assistant from "./Assistant";
+import EligibilityChecker from "./EligibilityChecker";
 import Workspace from "./Workspace";
 import Dashboard from "./Dashboard";
 import ScholarshipDetail from "./ScholarshipDetail";
@@ -24,7 +25,7 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
   useEffect(() => {
-    if (route === "/profile") window.location.hash = "/assistant";
+    if (route === "/profile") window.location.hash = "/eligibility";
   }, [route]);
   useEffect(() => {
     let active = true;
@@ -85,9 +86,11 @@ export default function App() {
   const title =
     route === "/assistant"
       ? "Let’s find some clarity"
-      : route.startsWith("/scholarships")
-        ? "Explore your opportunities"
-        : "Your next chapter starts here";
+      : route === "/eligibility"
+        ? "Check your scholarship eligibility"
+        : route.startsWith("/scholarships")
+          ? "Explore your opportunities"
+          : "Your next chapter starts here";
   return (
     <Workspace route={route} title={title}>
       {error && (
@@ -102,6 +105,7 @@ export default function App() {
         </p>
       )}
       {route === "/" && <Dashboard schemes={schemes} />}
+      {route === "/eligibility" && <EligibilityChecker />}
       {route === "/assistant" && <Assistant />}
       {schemeId && detail && (
         <ScholarshipDetail detail={detail} schemeId={schemeId} />

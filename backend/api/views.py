@@ -1,6 +1,7 @@
 """Small REST handlers; business logic remains in application services."""
 
 from core import corpus, memory
+from core.eligibility import StudentProfile, match_all_scholarships
 from core.schemas import SearchRequest
 from django.db import connection
 from rest_framework.permissions import IsAdminUser
@@ -42,6 +43,12 @@ def scholarship_detail(request, payload, scheme_id):
             "citation": corpus.citation(scheme, scheme_id + ":record").model_dump(),
         }
     )
+
+
+@endpoint("POST", StudentProfile)
+def eligibility_check(request, payload):
+    results = match_all_scholarships(payload)
+    return Response(results)
 
 
 @endpoint("POST")
