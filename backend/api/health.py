@@ -32,13 +32,13 @@ def ready(request):
     try:
         state = index_status()
         directory = index_dir() / state.get("version", "")
-        present = all(
-            (directory / name).is_file()
-            for name in ("vectors.faiss", "chunks.json", "metadata.json")
-        )
+        present = any(
+            (directory / name).is_file() or (directory / name).is_dir()
+            for name in ("qdrant_db", "vectors.npy", "vectors.faiss")
+        ) and (directory / "chunks.json").is_file() and (directory / "metadata.json").is_file()
         if state["ready"] and present:
             store = load_store(state["version"])
-            dimension = store.vectors.shape[1]
+            dimension = getattr(store, "dimension", None) or store.vectors.shape[1]
             checks["vector_index"] = True
         else:
             errors.append("VECTOR_UNAVAILABLE")

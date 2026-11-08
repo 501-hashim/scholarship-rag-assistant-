@@ -9,7 +9,7 @@ from pathlib import Path
 from core import corpus
 from core.rag.embeddings import embed_query, model_name
 from core.rag.query import classify_query
-from core.rag.vector_store import FAISSVectorStore
+from core.rag.vector_store import QdrantVectorStore
 
 COMMON = {
     "with",
@@ -76,7 +76,7 @@ def index_status() -> dict:
 
 @lru_cache(maxsize=4)
 def load_store(version: str):
-    store, metadata = FAISSVectorStore.load(index_dir())
+    store, metadata = QdrantVectorStore.load(index_dir())
     if (
         metadata["corpus_hash"] != corpus.fingerprint()
         or metadata["embedding_model"] != model_name()

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from core.rag.documents import prepare_documents
 from core.rag.retrieval import filters_for, retrieve
-from core.rag.vector_store import FAISSVectorStore
+from core.rag.vector_store import FAISSVectorStore, QdrantVectorStore
 
 
 def test_chunk_provenance():
@@ -18,17 +18,29 @@ def test_chunk_provenance():
 def test_vector_persistence_and_filter(tmp_path):
     chunks = prepare_documents()[:3]
     vectors = np.eye(3, dtype="float32")
-    store = FAISSVectorStore(vectors, chunks)
+    store = QdrantVectorStore(vectors, chunks)
     store.save(tmp_path, {"test": True})
-    loaded, metadata = FAISSVectorStore.load(tmp_path)
+    loaded, metadata = QdrantVectorStore.load(tmp_path)
     hits = loaded.search(vectors[:1], 3, {"section": [chunks[0].section]})
     assert all(c.section == chunks[0].section for c, _ in hits)
     assert metadata["test"] is True
 
 
 def test_empty_metadata_filter():
-    store = FAISSVectorStore(np.eye(2, dtype="float32"), prepare_documents()[:2])
+    store = QdrantVectorStore(np.eye(2, dtype="float32"), prepare_documents()[:2])
     assert store.search(np.eye(2, dtype="float32")[:1], 2, {"scheme_id": []}) == []
+
+
+def test_faiss_vector_persistence_and_filter(tmp_path):
+    faiss_path = tmp_path / "faiss"
+    chunks = prepare_documents()[:3]
+    vectors = np.eye(3, dtype="float32")
+    store = FAISSVectorStore(vectors, chunks)
+    store.save(faiss_path, {"test": True})
+    loaded, metadata = FAISSVectorStore.load(faiss_path)
+    hits = loaded.search(vectors[:1], 3, {"section": [chunks[0].section]})
+    assert all(c.section == chunks[0].section for c, _ in hits)
+    assert metadata["test"] is True
 
 
 def test_index_failure_is_explicit_and_never_uses_keyword_answers(monkeypatch):
