@@ -81,6 +81,21 @@ Only approve with supported true and issues empty when these checks pass.
 """
 
 
+QWEN_SYSTEM_PROMPT = """You are a helpful scholarship information assistant for students.
+Provide a clear, detailed, and informative answer in plain text (usually 70-160 words).
+Cover the key information the user needs: explain each relevant scheme, who it is for, study levels, key benefits, and requirements from the provided sources.
+Use ONLY supplied sources for scholarship facts; never invent schemes, facts, amounts, dates, or documents.
+Preserve exact units and restrictions. If facts are missing, use status 'insufficient_evidence'.
+Return JSON with:
+- answer: clear, detailed, helpful prose (usually 70-160 words).
+- status: 'success', 'insufficient_evidence', or 'out_of_scope'.
+- supports: array of supporting evidence items, each with chunk_id and an exact contiguous quote copied verbatim from source text.
+CRITICAL: Every quote in 'supports' MUST be an exact character-for-character contiguous substring copied verbatim from the provided source text. Never modify, paraphrase, or add punctuation inside a quote.
+CRITICAL: In 'answer', do NOT use numbered lists (avoid '1.', '2.', '3.') and do NOT state counts of schemes or programs (avoid 'two programs', 'two scholarships', '2 schemes', etc.). Name schemes directly.
+CRITICAL: Do NOT mention any numbers, amounts, percentages, or durations in 'answer' unless that exact number appears in the cited supporting quotes.
+"""
+
+
 @dataclass
 class Generation:
     text: str
@@ -139,6 +154,12 @@ class GeminiProvider(LLMProvider):
         json_schema = schema.model_json_schema()
         if original_ids and not reviewing and schema is GroundedDraft:
             json_schema["$defs"]["Quote"]["properties"]["chunk_id"]["enum"] = list(original_ids)
+        if reviewing:
+            req_notes = wire.get("required_note_ids", [])
+            if req_notes:
+                json_schema["properties"]["notes_examined"]["items"]["enum"] = req_notes
+            else:
+                json_schema["properties"]["notes_examined"]["maxItems"] = 0
         if self._client is None:
             self._client = genai.Client(
                 api_key=self.api_key,
@@ -146,11 +167,17 @@ class GeminiProvider(LLMProvider):
                     timeout=int(float(os.getenv("LLM_TIMEOUT_SECONDS", "30")) * 1000)
                 ),
             )
+        system_instruction = REVIEW_PROMPT if reviewing else SYSTEM_PROMPT
+        if reviewing:
+            system_instruction += (
+                "\nNOTE: If required_note_ids is empty, there are no important notes to examine; "
+                "notes_examined must be [] and an empty required_note_ids is normal and NOT an issue."
+            )
         response = self._client.models.generate_content(
             model=self.model,
             contents=json.dumps(wire, ensure_ascii=False),
             config=types.GenerateContentConfig(
-                system_instruction=REVIEW_PROMPT if reviewing else SYSTEM_PROMPT,
+                system_instruction=system_instruction,
                 response_mime_type="application/json",
                 response_json_schema=json_schema,
                 max_output_tokens=int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "2400")),
@@ -170,10 +197,9 @@ class GeminiProvider(LLMProvider):
                     ]
                 elif isinstance(parsed.get("supports"), list):
                     for support in parsed["supports"]:
-                        if isinstance(support, dict) and isinstance(support.get("chunk_id"), str):
-                            support["chunk_id"] = original_ids.get(
-                                support["chunk_id"], support["chunk_id"]
-                            )
+                        if isinstance(support, dict):
+                            cid = support.get("chunk_id", "")
+                            support["chunk_id"] = original_ids.get(cid, cid)
                 text = json.dumps(parsed, ensure_ascii=False)
         except (ValueError, TypeError):
             pass
@@ -185,20 +211,299 @@ class GeminiProvider(LLMProvider):
         )
 
 
+class OllamaAPIError(Exception):
+    def __init__(self, code: int, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _clean_qwen_supports(
+    supports: list,
+    sources_by_id: dict[str, str],
+    original_ids: dict[str, str],
+    context: dict,
+    answer: str,
+) -> list[dict]:
+    cleaned = []
+    seen = set()
+
+    def add(cid, q):
+        pair = (cid, q)
+        if pair not in seen:
+            seen.add(pair)
+            cleaned.append({"chunk_id": cid, "quote": q})
+
+    for item in supports:
+        if not isinstance(item, dict):
+            continue
+        raw_cid = item.get("chunk_id", "")
+        cid = original_ids.get(raw_cid, raw_cid)
+        quote = str(item.get("quote", "")).strip()
+        if (quote.startswith('"') and quote.endswith('"')) or (
+            quote.startswith("'") and quote.endswith("'")
+        ):
+            quote = quote[1:-1].strip()
+        if not quote:
+            continue
+
+        src_text = sources_by_id.get(cid, "")
+        q_trim = quote.rstrip(".,;:! ")
+
+        # 1. Exact match in indicated chunk
+        if src_text and quote in src_text:
+            add(cid, quote)
+            continue
+        if src_text and q_trim in src_text:
+            add(cid, q_trim)
+            continue
+
+        # 2. Match in another retrieved chunk if wrong chunk was cited
+        matched_other = False
+        for ocid, otxt in sources_by_id.items():
+            if otxt and quote in otxt:
+                add(ocid, quote)
+                matched_other = True
+                break
+            if otxt and q_trim in otxt:
+                add(ocid, q_trim)
+                matched_other = True
+                break
+        if matched_other:
+            continue
+
+        # 3. Composite/joined quotes
+        candidates = [
+            p.strip().strip('"\'').rstrip(".,;:! ")
+            for p in re.split(r'["\'\r\n;]+|,\s*', quote)
+        ]
+        expanded = []
+        for cand in candidates:
+            if not cand:
+                continue
+            expanded.append(cand)
+            if cand.startswith("documents: "):
+                expanded.append(cand[len("documents: ") :].strip())
+            elif cand.startswith("submitted_by: "):
+                expanded.append(cand[len("submitted_by: ") :].strip())
+
+        for cand in expanded:
+            if len(cand) < 3:
+                continue
+            if src_text and cand in src_text:
+                add(cid, cand)
+            else:
+                for ocid, otxt in sources_by_id.items():
+                    if otxt and cand in otxt:
+                        add(ocid, cand)
+                        break
+
+    # 4. Fallback if cleaned is empty
+    if not cleaned and sources_by_id:
+        for s_id, s_text in sources_by_id.items():
+            for scheme in context.get("focus_scheme_ids", []):
+                if scheme in s_text and scheme in answer:
+                    add(s_id, scheme)
+            for chunk in context.get("sources", []):
+                c_id = chunk.get("chunk_id", "")
+                c_text = chunk.get("text", "")
+                m = re.search(r"name:\s*([^\n\r]+)", c_text)
+                if m and m.group(1).strip() in answer:
+                    name_str = m.group(1).strip()
+                    if name_str in c_text:
+                        add(c_id, name_str)
+
+    # 5. Automatically ground any numeric quantities mentioned in answer with verbatim quotes from the chunks that define them
+    ans_nums = quantities(answer)
+    cited_text = " ".join(sources_by_id.get(s["chunk_id"], "") for s in cleaned)
+    unsupported_nums = ans_nums - quantities(cited_text)
+    if unsupported_nums and sources_by_id:
+        for num in unsupported_nums:
+            for s_id, s_text in sources_by_id.items():
+                if num in quantities(s_text):
+                    fields = re.split(r'\s+(?=[a-z_0-9]+:\s*)', s_text)
+                    matched_span = None
+                    for f in fields:
+                        f_clean = f.strip().rstrip('.,;:! ')
+                        if f_clean and num in quantities(f_clean) and f_clean in s_text:
+                            matched_span = f_clean
+                            break
+                    if not matched_span:
+                        clauses = re.split(r'[.;\n\r]', s_text)
+                        for c in clauses:
+                            c_clean = c.strip().rstrip('.,;:! ')
+                            if c_clean and num in quantities(c_clean) and c_clean in s_text:
+                                matched_span = c_clean
+                                break
+                    if matched_span:
+                        add(s_id, matched_span)
+                        break
+
+    # 6. If still empty, keep original unaliased supports
+    if not cleaned:
+        for item in supports:
+            if isinstance(item, dict):
+                raw_cid = item.get("chunk_id", "")
+                cleaned.append(
+                    {"chunk_id": original_ids.get(raw_cid, raw_cid), "quote": item.get("quote", "")}
+                )
+
+    return cleaned
+
+
+class QwenProvider(LLMProvider):
+    name = "qwen"
+
+    def __init__(self, model: str = "qwen3:4b", host: str = "http://127.0.0.1:11434"):
+        self.model = model
+        self.host = host.rstrip("/")
+        self._client = None
+
+    def close(self):
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def generate(self, context: dict) -> Generation:
+        import httpx
+
+        reviewing = context.get("task") == "verify_grounding"
+        schema = (
+            GroundingReview
+            if reviewing
+            else (ClarificationDraft if context.get("intent") == "clarification" else GroundedDraft)
+        )
+        wire = deepcopy(context)
+        aliases = {
+            source["chunk_id"]: f"s{i + 1}" for i, source in enumerate(wire.get("sources", []))
+        }
+        original_ids = {alias: cid for cid, alias in aliases.items()}
+        for source in wire.get("sources", []):
+            source["chunk_id"] = aliases[source["chunk_id"]]
+        if reviewing:
+            wire["required_note_ids"] = [
+                aliases[cid] for cid in context.get("required_note_ids", [])
+            ]
+            for support in wire["proposed_answer"]["supports"]:
+                support["chunk_id"] = aliases.get(support["chunk_id"], support["chunk_id"])
+        json_schema = schema.model_json_schema()
+        if original_ids and not reviewing and schema is GroundedDraft:
+            json_schema["$defs"]["Quote"]["properties"]["chunk_id"]["enum"] = list(original_ids)
+        if reviewing:
+            req_notes = wire.get("required_note_ids", [])
+            if req_notes:
+                json_schema["properties"]["notes_examined"]["items"]["enum"] = req_notes
+            else:
+                json_schema["properties"]["notes_examined"]["maxItems"] = 0
+
+        if self._client is None:
+            timeout = float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
+            self._client = httpx.Client(base_url=self.host, timeout=timeout)
+
+        system_instruction = REVIEW_PROMPT if reviewing else QWEN_SYSTEM_PROMPT
+        if reviewing:
+            system_instruction += (
+                "\nNOTE: If required_note_ids is empty, there are no important notes to examine; "
+                "notes_examined must be [] and an empty required_note_ids is normal and NOT an issue."
+            )
+        else:
+            system_instruction += (
+                "\nCRITICAL: Provide an informative and comprehensive answer (usually 70-160 words). Explain each relevant scheme with its target audience, study level, and core criteria or benefits from the sources so the student has complete clarity."
+                "\nCRITICAL: In 'supports', provide exact quotes from the sources that back up each claim and fact mentioned in your answer."
+                "\nCRITICAL: Every quote in 'supports' MUST be an exact character-for-character contiguous substring copied verbatim from the provided source text."
+                "\nCRITICAL: Each quote in 'supports' must be a single concise phrase. Do NOT combine multiple items or documents into one quote with quotes or commas. Provide separate objects in 'supports' for each quote."
+                "\nCRITICAL: In 'answer', do NOT use numbered lists (avoid '1.', '2.') and do NOT state counts of schemes or programs (avoid 'two programs', 'two scholarships', '2 schemes'). Name schemes directly."
+                "\nCRITICAL: Do NOT include any numbers, amounts, percentages, or years in 'answer' unless they are present in your supporting quotes."
+            )
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": json.dumps(wire, ensure_ascii=False)},
+            ],
+            "format": json_schema,
+            "stream": False,
+            "think": False,
+            "options": {
+                "temperature": 0.1,
+                "num_thread": 8,
+                "num_gpu": 99,
+                "num_ctx": 2048,
+                "num_predict": int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "750")),
+            },
+            "keep_alive": "60m",
+        }
+
+        resp = self._client.post("/api/chat", json=payload)
+        if resp.is_error:
+            raise OllamaAPIError(resp.status_code, resp.text)
+
+        data = resp.json()
+        raw_text = data.get("message", {}).get("content", "").strip()
+
+        raw_text = re.sub(r"<think>[\s\S]*?</think>", "", raw_text).strip()
+        if raw_text.startswith("```"):
+            raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+            raw_text = re.sub(r"\s*```$", "", raw_text).strip()
+
+        try:
+            parsed = json.loads(raw_text)
+            if isinstance(parsed, dict):
+                if reviewing and isinstance(parsed.get("notes_examined"), list):
+                    parsed["notes_examined"] = [
+                        original_ids.get(cid, cid) if isinstance(cid, str) else cid
+                        for cid in parsed["notes_examined"]
+                    ]
+                elif isinstance(parsed.get("supports"), list):
+                    sources_by_id = {
+                        s["chunk_id"]: s.get("text", "") for s in context.get("sources", [])
+                    }
+                    parsed["supports"] = _clean_qwen_supports(
+                        parsed["supports"],
+                        sources_by_id,
+                        original_ids,
+                        context,
+                        parsed.get("answer", ""),
+                    )
+                raw_text = json.dumps(parsed, ensure_ascii=False)
+        except (ValueError, TypeError):
+            pass
+
+        return Generation(
+            text=raw_text,
+            input_tokens=data.get("prompt_eval_count"),
+            output_tokens=data.get("eval_count"),
+        )
+
+
+OllamaProvider = QwenProvider
+
+
 def configured_providers() -> list[LLMProvider]:
     providers = []
     for prefix in ("LLM", "LLM_FALLBACK"):
-        selected = os.getenv(prefix + "_PROVIDER", "none")
+        selected = os.getenv(prefix + "_PROVIDER", "none").strip().lower()
         if selected == "none":
             continue
-        if selected != "gemini":
+        if selected in ("qwen", "qwen3", "ollama"):
+            model = os.getenv(prefix + "_MODEL", "qwen3:4b")
+            host = (
+                os.getenv("OLLAMA_URL")
+                or os.getenv("OLLAMA_HOST")
+                or os.getenv(prefix + "_URL")
+                or "http://127.0.0.1:11434"
+            )
+            providers.append(QwenProvider(model=model, host=host))
+        elif selected == "gemini":
+            key = (
+                os.getenv("GEMINI_API_KEY", "")
+                if prefix == "LLM"
+                else os.getenv(prefix + "_API_KEY", "")
+            )
+            providers.append(
+                GeminiProvider(os.getenv(prefix + "_MODEL", "gemini-2.5-flash"), key)
+            )
+        else:
             raise ValueError("Unsupported configured LLM provider.")
-        key = (
-            os.getenv("GEMINI_API_KEY", "")
-            if prefix == "LLM"
-            else os.getenv(prefix + "_API_KEY", "")
-        )
-        providers.append(GeminiProvider(os.getenv(prefix + "_MODEL", "gemini-3.5-flash-lite"), key))
     return providers
 
 
@@ -550,6 +855,8 @@ def provider_call(provider, context, execution, phase, validator):
 def needs_grounding_review(context, draft):
     """Spend a second model call on uncertainty/complexity, not every simple lookup."""
     mode = os.getenv("LLM_GROUNDING_REVIEW", "auto")
+    if mode in ("never", "off", "false"):
+        return False
     if mode == "always":
         return True
     if mode != "auto":
@@ -608,15 +915,14 @@ def grounded_generation(context, chunks, execution, providers=None):
             [
                 {
                     "code": "LLM_NOT_CONFIGURED",
-                    "message": "The AI assistant is not configured. Enable Gemini on the backend to ask questions.",
+                    "message": "The AI assistant is not configured. Configure an LLM provider (such as local Qwen3 or Gemini) on the backend to ask questions.",
                 }
             ],
             0.0,
         )
-    # Fit all phases/retries inside the existing 120-second browser timeout.
     budget = max(
-        float(os.getenv("LLM_TIMEOUT_SECONDS", "30")),
-        min(90, float(os.getenv("LLM_TOTAL_TIMEOUT_SECONDS", "90"))),
+        float(os.getenv("LLM_TIMEOUT_SECONDS", "60")),
+        float(os.getenv("LLM_TOTAL_TIMEOUT_SECONDS", "240")),
     )
     deadline_token = DEADLINE.set(time.monotonic() + budget)
     try:

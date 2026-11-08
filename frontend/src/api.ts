@@ -27,7 +27,7 @@ export async function api<T>(
   method?: "DELETE",
 ): Promise<T> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 120000);
+  const timeout = window.setTimeout(() => controller.abort(), 240000);
   const authToken = getAuthToken();
   try {
     const response = await fetch(BASE + "/api" + path, {

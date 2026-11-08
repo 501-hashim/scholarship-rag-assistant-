@@ -372,3 +372,71 @@ def test_server_retry_delay_is_respected_or_stops_when_above_cap(monkeypatch):
     sleeps.clear()
     grounded_generation({}, [], execution, [provider])
     assert provider.calls == 1 and not sleeps
+
+
+def test_qwen_provider_generates_and_resolves_aliases(monkeypatch):
+    from core.llm import QwenProvider, configured_providers
+
+    chunk = SimpleNamespace(chunk_id="nsp:documents", text="Required: Aadhaar Card.", citation={})
+    requests = []
+
+    def handle(request):
+        body = json.loads(request.content)
+        requests.append(body)
+        assert body["model"] == "qwen3:4b"
+        assert body["think"] is False
+        assert "responseJsonSchema" not in body
+        assert body["format"]["properties"]["answer"]["type"] == "string"
+        return httpx.Response(
+            200,
+            json={
+                "message": {
+                    "role": "assistant",
+                    "content": json.dumps({
+                        "answer": "You need an Aadhaar Card.",
+                        "status": "success",
+                        "supports": [{"chunk_id": "s1", "quote": "Required: Aadhaar Card."}],
+                    }),
+                },
+                "prompt_eval_count": 45,
+                "eval_count": 22,
+            },
+        )
+
+    provider = QwenProvider(model="qwen3:4b", host="http://127.0.0.1:11434")
+    provider._client = httpx.Client(transport=httpx.MockTransport(handle), base_url=provider.host)
+
+    context = {
+        "question": "What documents?",
+        "sources": [{"chunk_id": chunk.chunk_id, "text": chunk.text, "section": "documents_required"}],
+    }
+    result = provider.generate(context)
+    assert len(requests) == 1
+    assert result.input_tokens == 45
+    assert result.output_tokens == 22
+    draft = validate_draft(result.text, [chunk])
+    assert draft.supports[0].chunk_id == chunk.chunk_id
+    assert draft.supports[0].quote == chunk.text
+    provider.close()
+
+
+def test_configured_providers_supports_qwen_and_ollama(monkeypatch):
+    from core.llm import QwenProvider, configured_providers
+
+    monkeypatch.setenv("LLM_PROVIDER", "qwen")
+    monkeypatch.setenv("LLM_MODEL", "qwen3:4b")
+    monkeypatch.setenv("OLLAMA_URL", "http://localhost:11434")
+    providers = configured_providers()
+    assert len(providers) == 1
+    assert isinstance(providers[0], QwenProvider)
+    assert providers[0].model == "qwen3:4b"
+    assert providers[0].host == "http://localhost:11434"
+
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    providers = configured_providers()
+    assert len(providers) == 1
+    assert isinstance(providers[0], QwenProvider)
+
+    monkeypatch.setenv("LLM_PROVIDER", "unsupported_xyz")
+    with pytest.raises(ValueError, match="Unsupported configured LLM provider"):
+        configured_providers()
