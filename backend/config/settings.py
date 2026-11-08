@@ -64,13 +64,7 @@ TEMPLATES = [
     }
 ]
 WSGI_APPLICATION = "config.wsgi.application"
-db_engine = os.getenv("DB_ENGINE")
-if db_engine is None:
-    if not DEBUG:
-        raise ImproperlyConfigured(
-            "Production requires an explicit DB_ENGINE=mysql or DB_ENGINE=sqlite."
-        )
-    db_engine = "sqlite"
+db_engine = (os.getenv("DB_ENGINE") or "mysql").lower().strip()
 if db_engine == "mysql":
     DATABASES = {
         "default": {

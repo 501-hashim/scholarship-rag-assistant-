@@ -152,18 +152,21 @@ def test_production_still_requires_a_secret(load_settings, engine):
         load_settings(DB_ENGINE=engine, DJANGO_DEBUG="false", DJANGO_SECRET_KEY="")
 
 
-def test_omitted_engine_still_defaults_to_sqlite_in_debug(load_settings, tmp_path):
+def test_omitted_engine_defaults_to_mysql(load_settings):
     configured = load_settings()
     assert configured["DEBUG"] is True
-    assert configured["DATABASES"]["default"]["NAME"] == tmp_path / "var/dev.sqlite3"
+    assert configured["DATABASES"]["default"]["ENGINE"] == "django.db.backends.mysql"
+    assert configured["DATABASES"]["default"]["NAME"] == "scholarships"
 
 
-def test_omitted_engine_still_fails_in_production(load_settings):
-    with pytest.raises(ImproperlyConfigured, match="explicit DB_ENGINE"):
-        load_settings(DJANGO_DEBUG="false", DJANGO_SECRET_KEY="test-only-secret")
+def test_omitted_engine_in_production_defaults_to_mysql(load_settings):
+    configured = load_settings(DJANGO_DEBUG="false", DJANGO_SECRET_KEY="test-only-secret")
+    assert configured["DEBUG"] is False
+    assert configured["DATABASES"]["default"]["ENGINE"] == "django.db.backends.mysql"
+    assert configured["DATABASES"]["default"]["NAME"] == "scholarships"
 
 
-@pytest.mark.parametrize("engine", ["", "postgres", "sqltie"])
+@pytest.mark.parametrize("engine", ["postgres", "sqltie", "oracle"])
 @pytest.mark.parametrize("debug", ["true", "false"])
 def test_unsupported_database_engine_fails_explicitly(load_settings, engine, debug):
     with pytest.raises(ImproperlyConfigured, match="DB_ENGINE must be mysql or sqlite"):
