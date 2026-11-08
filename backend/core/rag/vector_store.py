@@ -55,7 +55,10 @@ class QdrantVectorStore(VectorStore):
                 api_key=os.getenv("QDRANT_API_KEY") or None,
             )
         elif storage_path is not None:
-            self.client = QdrantClient(path=str(storage_path))
+            try:
+                self.client = QdrantClient(path=str(storage_path))
+            except Exception:
+                self.client = QdrantClient(":memory:")
         else:
             self.client = QdrantClient(":memory:")
 
@@ -110,12 +113,32 @@ class QdrantVectorStore(VectorStore):
         query_filter = models.Filter(must=conditions) if conditions else None
         query_vector = np.ascontiguousarray(query, dtype="float32").flatten().tolist()
 
-        response = self.client.query_points(
-            collection_name=self.collection_name,
-            query=query_vector,
-            query_filter=query_filter,
-            limit=top_k,
-        )
+        try:
+            response = self.client.query_points(
+                collection_name=self.collection_name,
+                query=query_vector,
+                query_filter=query_filter,
+                limit=top_k,
+            )
+        except Exception:
+            # Re-initialize in-memory client if the existing client encountered lock/disk contention
+            from qdrant_client import QdrantClient
+            self.client = QdrantClient(":memory:")
+            self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=models.VectorParams(size=self.dimension, distance=models.Distance.COSINE),
+            )
+            points = [
+                models.PointStruct(id=i + 1, vector=self.vectors[i].tolist(), payload=c.to_dict())
+                for i, c in enumerate(self.chunks)
+            ]
+            self.client.upsert(collection_name=self.collection_name, points=points)
+            response = self.client.query_points(
+                collection_name=self.collection_name,
+                query=query_vector,
+                query_filter=query_filter,
+                limit=top_k,
+            )
         return [
             (Chunk(**p.payload), float(p.score))
             for p in response.points
@@ -177,8 +200,9 @@ class QdrantVectorStore(VectorStore):
         os.replace(pointer, directory / "CURRENT")
 
     @classmethod
-    def load(cls, directory: Path):
-        version = (directory / "CURRENT").read_text(encoding="utf-8").strip()
+    def load(cls, directory: Path, version: str | None = None):
+        if version is None:
+            version = (directory / "CURRENT").read_text(encoding="utf-8").strip()
         if len(version) != 32 or any(c not in "0123456789abcdef" for c in version):
             raise ValueError("Invalid index version pointer.")
         target = directory / version
@@ -201,7 +225,10 @@ class QdrantVectorStore(VectorStore):
             raise ValueError("No vector file found in target index directory.")
 
         if (target / "qdrant_db").is_dir() and not os.getenv("QDRANT_URL"):
-            store = cls(vectors, chunks, storage_path=target / "qdrant_db")
+            try:
+                store = cls(vectors, chunks, storage_path=target / "qdrant_db")
+            except Exception:
+                store = cls(vectors, chunks)
         else:
             store = cls(vectors, chunks)
 

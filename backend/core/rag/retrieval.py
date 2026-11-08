@@ -55,29 +55,60 @@ def index_dir() -> Path:
 def index_status() -> dict:
     try:
         directory = index_dir()
-        version = (directory / "CURRENT").read_text(encoding="utf-8").strip()
-        if not re.fullmatch(r"[0-9a-f]{32}", version):
-            raise ValueError("Invalid pointer")
+        current_version = (directory / "CURRENT").read_text(encoding="utf-8").strip()
+        versions = [current_version]
+        if directory.is_dir():
+            for p in directory.iterdir():
+                if p.is_dir() and p.name != current_version and re.fullmatch(r"[0-9a-f]{32}", p.name):
+                    versions.append(p.name)
         import json
 
-        metadata = json.loads((directory / version / "metadata.json").read_text(encoding="utf-8"))
-        ready = (
-            metadata["corpus_hash"] == corpus.fingerprint()
-            and metadata["embedding_model"] == model_name()
-        )
-        return {
-            "ready": ready,
-            "version": version,
-            "chunks": metadata["chunk_count"],
-            "reason": None if ready else "Corpus or embedding model changed; re-ingest.",
-        }
+        active_version = None
+        active_metadata = None
+        current_fp = corpus.fingerprint()
+        current_model = model_name()
+
+        for ver in versions:
+            meta_path = directory / ver / "metadata.json"
+            if meta_path.is_file():
+                try:
+                    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                    if meta.get("corpus_hash") == current_fp and meta.get("embedding_model") == current_model:
+                        active_version = ver
+                        active_metadata = meta
+                        break
+                except Exception:
+                    continue
+
+        if active_version and active_metadata:
+            return {
+                "ready": True,
+                "version": active_version,
+                "chunks": active_metadata["chunk_count"],
+                "reason": None,
+            }
+
+        if re.fullmatch(r"[0-9a-f]{32}", current_version) and (directory / current_version / "metadata.json").is_file():
+            meta = json.loads((directory / current_version / "metadata.json").read_text(encoding="utf-8"))
+            ready = (
+                meta.get("corpus_hash") == current_fp
+                and meta.get("embedding_model") == current_model
+            )
+            return {
+                "ready": ready,
+                "version": current_version,
+                "chunks": meta.get("chunk_count", 0),
+                "reason": None if ready else "Corpus or embedding model changed; re-ingest.",
+            }
+        return {"ready": False, "reason": "Index unavailable; run ingest_scholarships."}
     except (OSError, ValueError, KeyError):
         return {"ready": False, "reason": "Index unavailable; run ingest_scholarships."}
 
 
 @lru_cache(maxsize=4)
 def load_store(version: str):
-    store, metadata = QdrantVectorStore.load(index_dir())
+    directory = index_dir()
+    store, metadata = QdrantVectorStore.load(directory, version=version)
     if (
         metadata["corpus_hash"] != corpus.fingerprint()
         or metadata["embedding_model"] != model_name()

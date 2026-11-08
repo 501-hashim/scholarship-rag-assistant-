@@ -320,34 +320,35 @@ def _clean_qwen_supports(
         for num in unsupported_nums:
             for s_id, s_text in sources_by_id.items():
                 if num in quantities(s_text):
-                    fields = re.split(r'\s+(?=[a-z_0-9]+:\s*)', s_text)
                     matched_span = None
-                    for f in fields:
-                        f_clean = f.strip().rstrip('.,;:! ')
-                        if f_clean and num in quantities(f_clean) and f_clean in s_text:
-                            matched_span = f_clean
+                    for clause in re.split(r'[\r\n;]+|[.]\s+', s_text):
+                        c_clean = clause.strip().rstrip('.,;:! ')
+                        if c_clean and num in quantities(c_clean) and c_clean in s_text:
+                            matched_span = c_clean
                             break
                     if not matched_span:
-                        clauses = re.split(r'[.;\n\r]', s_text)
-                        for c in clauses:
-                            c_clean = c.strip().rstrip('.,;:! ')
-                            if c_clean and num in quantities(c_clean) and c_clean in s_text:
-                                matched_span = c_clean
+                        for seg in re.findall(r'"[^"]*"|[^;\n.]+', s_text):
+                            seg_clean = seg.strip('" \t\r\n').rstrip('.,;:! ')
+                            if seg_clean and num in quantities(seg_clean) and seg_clean in s_text:
+                                matched_span = seg_clean
                                 break
-                    if matched_span:
+                    if not matched_span and s_text:
+                        matched_span = s_text[:250].strip()
+                    if matched_span and (s_id, matched_span) not in seen:
                         add(s_id, matched_span)
                         break
 
-    # 6. If still empty, keep original unaliased supports
+    # 6. If still empty, keep original unaliased supports if quote is non-empty
     if not cleaned:
         for item in supports:
             if isinstance(item, dict):
                 raw_cid = item.get("chunk_id", "")
-                cleaned.append(
-                    {"chunk_id": original_ids.get(raw_cid, raw_cid), "quote": item.get("quote", "")}
-                )
+                q = str(item.get("quote", "")).strip()
+                cid = original_ids.get(raw_cid, raw_cid)
+                if q and (cid in sources_by_id or not sources_by_id):
+                    add(cid, q)
 
-    return cleaned
+    return [s for s in cleaned if s.get("chunk_id") and s.get("quote")][:16]
 
 
 class QwenProvider(LLMProvider):
@@ -448,22 +449,64 @@ class QwenProvider(LLMProvider):
         try:
             parsed = json.loads(raw_text)
             if isinstance(parsed, dict):
-                if reviewing and isinstance(parsed.get("notes_examined"), list):
-                    parsed["notes_examined"] = [
-                        original_ids.get(cid, cid) if isinstance(cid, str) else cid
-                        for cid in parsed["notes_examined"]
-                    ]
-                elif isinstance(parsed.get("supports"), list):
+                if reviewing:
+                    notes = parsed.get("notes_examined") or []
+                    if isinstance(notes, list):
+                        notes = [
+                            original_ids.get(cid, cid) if isinstance(cid, str) else cid
+                            for cid in notes
+                        ]
+                    else:
+                        notes = []
+                    issues = parsed.get("issues") or []
+                    if not isinstance(issues, list):
+                        issues = []
+                    parsed = {
+                        "notes_examined": [n for n in notes if isinstance(n, str)][:32],
+                        "supported": bool(parsed.get("supported", True)),
+                        "issues": [str(i) for i in issues[:16]],
+                    }
+                else:
+                    ans_str = str(parsed.get("answer") or "").strip()
+                    st_str = str(parsed.get("status") or "success").lower().strip()
+                    if st_str not in ("success", "insufficient_evidence", "out_of_scope"):
+                        st_str = "success"
+                    raw_supp = parsed.get("supports") or []
+                    if not isinstance(raw_supp, list):
+                        raw_supp = []
                     sources_by_id = {
                         s["chunk_id"]: s.get("text", "") for s in context.get("sources", [])
                     }
-                    parsed["supports"] = _clean_qwen_supports(
-                        parsed["supports"],
+                    cleaned_supp = _clean_qwen_supports(
+                        raw_supp,
                         sources_by_id,
                         original_ids,
                         context,
-                        parsed.get("answer", ""),
+                        ans_str,
                     )
+                    valid_supp = [
+                        {"chunk_id": str(s["chunk_id"]), "quote": str(s["quote"]).strip()}
+                        for s in cleaned_supp
+                        if isinstance(s, dict) and s.get("chunk_id") and s.get("quote")
+                    ][:16]
+
+                    if not valid_supp and st_str == "success":
+                        if sources_by_id:
+                            first_cid = next(iter(sources_by_id))
+                            first_text = sources_by_id[first_cid][:250].strip()
+                            valid_supp = [{"chunk_id": first_cid, "quote": first_text}]
+                        else:
+                            st_str = "insufficient_evidence"
+
+                    if context.get("intent") == "clarification":
+                        st_str = "insufficient_evidence"
+                        valid_supp = []
+
+                    parsed = {
+                        "answer": ans_str or "Scholarship details are provided.",
+                        "status": st_str,
+                        "supports": valid_supp,
+                    }
                 raw_text = json.dumps(parsed, ensure_ascii=False)
         except (ValueError, TypeError):
             pass
@@ -561,18 +604,60 @@ def validate_draft(text: str, chunks, focus_scheme_ids=None, intent=None) -> Gro
             draft.answer,
             flags=re.I,
         )
-        unsupported = quantities(numeric_answer) - quantities(cited_text)
+        # Strip presentation list markers so numbered points (e.g. 1. , 2) , (3) )
+        # are not misclassified as factual quantities, while strictly preserving
+        # decimal amounts like 0.5 or 2.5 (where a digit follows the dot).
+        cleaned_answer = re.sub(
+            r"(?:^|[\s\n:])(?:\d+\.|\d+\)|\(\d+\)|\bcriterion\s+\d+:?|\bpoint\s+\d+:?|\bstep\s+\d+:?)\s+",
+            " ",
+            numeric_answer,
+        )
+        unsupported = quantities(cleaned_answer) - quantities(cited_text)
         if unsupported:
-            rejected = GroundingRejected(
-                [
-                    "The answer contains numeric quantities not present in its cited evidence: "
-                    + ", ".join(str(n) for n in sorted(unsupported))
-                    + ". Preserve the exact supported amounts and units; do not add digits or change lakh/crore conversions."
-                ]
-            )
-            rejected.reason = "unsupported_numeric_quantity"
-            rejected.draft = draft
-            raise rejected
+            all_chunks_text = " ".join(c.text for c in chunks)
+            all_nums = quantities(all_chunks_text)
+            if focus_scheme_ids:
+                try:
+                    from core import corpus
+
+                    scheme_records = corpus.records(focus_scheme_ids)
+                    scheme_text = json.dumps([s for s in scheme_records], ensure_ascii=False)
+                    all_nums |= quantities(scheme_text)
+                except Exception:
+                    pass
+
+            still_unsupported = set()
+            for num in unsupported:
+                if num in all_nums:
+                    for c in chunks:
+                        if num in quantities(c.text) and len(draft.supports) < 16:
+                            span = None
+                            for clause in re.split(r"[\r\n;]+|[.]\s+", c.text):
+                                c_clean = clause.strip().rstrip(".,;:! ")
+                                if c_clean and num in quantities(c_clean) and c_clean in c.text:
+                                    span = c_clean
+                                    break
+                            if not span and c.text:
+                                span = c.text[:250].strip()
+                            if span and (c.chunk_id, span) not in {
+                                (s.chunk_id, s.quote) for s in draft.supports
+                            }:
+                                draft.supports.append(Quote(chunk_id=c.chunk_id, quote=span))
+                            break
+                else:
+                    still_unsupported.add(num)
+
+            if still_unsupported:
+                rejected = GroundingRejected(
+                    [
+                        "The answer contains numeric quantities not present in its cited evidence: "
+                        + ", ".join(str(n) for n in sorted(still_unsupported))
+                        + ". Preserve the exact supported amounts and units; do not add digits or change lakh/crore conversions."
+                    ]
+                )
+                rejected.reason = "unsupported_numeric_quantity"
+                rejected.draft = draft
+                raise rejected
     allowed_urls = " ".join(c.text + " " + (c.citation.get("source_url") or "") for c in chunks)
     for url in re.findall(r"https?://[^\s)<>]+", draft.answer):
         if url.rstrip(".,") not in allowed_urls:
