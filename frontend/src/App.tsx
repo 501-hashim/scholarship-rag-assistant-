@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
-import { api } from "./api";
-import { fetchCurrentUser, getStoredUser, logout } from "./auth";
-import Assistant from "./Assistant";
-import EligibilityChecker from "./EligibilityChecker";
-import AuthGateway from "./AuthGateway";
-import Workspace from "./Workspace";
-import Dashboard from "./Dashboard";
-import ScholarshipDetail from "./ScholarshipDetail";
-import ScholarshipList from "./ScholarshipList";
-import { navigate } from "./navigation";
-import type { Citation, Scheme, User } from "./types";
+import { api } from "@/services/api";
+import { fetchCurrentUser, getStoredUser, logout } from "@/features/auth/auth";
+import Assistant from "@/features/assistant/Assistant";
+import EligibilityChecker from "@/features/eligibility/EligibilityChecker";
+import AuthGateway from "@/features/auth/AuthGateway";
+import Workspace from "@/features/workspace/Workspace";
+import Dashboard from "@/features/workspace/Dashboard";
+import ScholarshipDetail from "@/features/scholarships/ScholarshipDetail";
+import ScholarshipList from "@/features/scholarships/ScholarshipList";
+import { navigate } from "@/services/navigation";
+import type { Citation, Scheme, User } from "@/types/types";
 
 export default function App() {
   const [route, setRoute] = useState(window.location.hash.slice(1) || "/");

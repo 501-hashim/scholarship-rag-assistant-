@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { api } from "./api";
-import { Source } from "./components";
-import type { Answer } from "./types";
+import { api } from "@/services/api";
+import { Source } from "@/components/components";
+import type { Answer } from "@/types/types";
 type Message = {
   role: "user" | "assistant";
   question?: string;

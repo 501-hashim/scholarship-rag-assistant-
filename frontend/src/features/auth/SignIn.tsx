@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { loginWithEmail, registerWithEmail } from "./auth";
-import { navigate } from "./navigation";
-import type { User } from "./types";
+import { loginWithEmail, registerWithEmail } from "@/features/auth/auth";
+import { navigate } from "@/services/navigation";
+import type { User } from "@/types/types";
 
 export default function SignIn({
   onAuthSuccess,

@@ -1,15 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { Source } from "./components";
-import Dashboard from "./Dashboard";
-import Assistant from "./Assistant";
-import EligibilityChecker from "./EligibilityChecker";
-import SignIn from "./SignIn";
-import AuthGateway from "./AuthGateway";
+import { Source } from "@/components/components";
+import Dashboard from "@/features/workspace/Dashboard";
+import Assistant from "@/features/assistant/Assistant";
+import EligibilityChecker from "@/features/eligibility/EligibilityChecker";
+import SignIn from "@/features/auth/SignIn";
+import AuthGateway from "@/features/auth/AuthGateway";
 import App from "./App";
-import { api } from "./api";
+import { api } from "@/services/api";
 
-vi.mock("./api", () => ({
+vi.mock("@/services/api", () => ({
   api: vi.fn(),
   getAuthToken: vi.fn(() => null),
   setAuthToken: vi.fn(),

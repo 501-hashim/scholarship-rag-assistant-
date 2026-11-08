@@ -1,6 +1,6 @@
-import Assistant from "./Assistant";
-import { Facts, Source } from "./components";
-import type { Citation, Scheme } from "./types";
+import Assistant from "@/features/assistant/Assistant";
+import { Facts, Source } from "@/components/components";
+import type { Citation, Scheme } from "@/types/types";
 export default function ScholarshipDetail({
   detail,
   schemeId,

@@ -1,5 +1,5 @@
-import { api, getAuthToken, setAuthToken } from "./api";
-import type { AuthResponse, User } from "./types";
+import { api, getAuthToken, setAuthToken } from "@/services/api";
+import type { AuthResponse, User } from "@/types/types";
 
 export function getStoredUser(): User | null {
   try {

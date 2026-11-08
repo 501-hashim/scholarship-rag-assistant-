@@ -1,5 +1,5 @@
-import type { Scheme } from "./types";
-import { navigate } from "./navigation";
+import type { Scheme } from "@/types/types";
+import { navigate } from "@/services/navigation";
 export default function Dashboard({ schemes }: { schemes: Scheme[] }) {
   return (
     <>

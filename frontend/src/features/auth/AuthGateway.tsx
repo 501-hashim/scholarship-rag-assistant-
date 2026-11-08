@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { api } from "./api";
-import { loginWithEmail, loginWithGoogle, registerWithEmail } from "./auth";
-import type { User } from "./types";
+import { api } from "@/services/api";
+import { loginWithEmail, loginWithGoogle, registerWithEmail } from "@/features/auth/auth";
+import type { User } from "@/types/types";
 
 export default function AuthGateway({
   onAuthSuccess,

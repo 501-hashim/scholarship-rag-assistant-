@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { api } from "./api";
-import { navigate, schemeHref } from "./navigation";
-import type { EligibilityCheckResponse, MatchResultItem, StudentProfile } from "./types";
+import { api } from "@/services/api";
+import { navigate, schemeHref } from "@/services/navigation";
+import type { EligibilityCheckResponse, MatchResultItem, StudentProfile } from "@/types/types";
 
 const INITIAL_PROFILE: StudentProfile = {
   gender: "",

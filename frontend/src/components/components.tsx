@@ -1,5 +1,5 @@
-import type { Citation } from "./types";
-import { schemeHref } from "./navigation";
+import type { Citation } from "@/types/types";
+import { schemeHref } from "@/services/navigation";
 
 export function human(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());

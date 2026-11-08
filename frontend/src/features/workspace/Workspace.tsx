@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { navigate } from "./navigation";
-import type { User } from "./types";
+import { navigate } from "@/services/navigation";
+import type { User } from "@/types/types";
 
 export default function Workspace({
   route,

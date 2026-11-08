@@ -1,5 +1,5 @@
-import { schemeHref } from "./navigation";
-import type { Scheme } from "./types";
+import { schemeHref } from "@/services/navigation";
+import type { Scheme } from "@/types/types";
 type Props = {
   route: string;
   schemes: Scheme[];
