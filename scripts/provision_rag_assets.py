@@ -34,7 +34,7 @@ def index_paths(manifest):
 
 
 def validate_index(manifest, root=ROOT):
-    directory = root / "var/index"
+    directory = root / "data/index" if (root / "data/index").exists() else root / "var/index"
     if set(manifest["index_files"]) != index_paths(manifest):
         raise ValueError("The deployment index allowlist must contain exactly four files.")
     for name, expected in manifest["index_files"].items():
@@ -43,7 +43,7 @@ def validate_index(manifest, root=ROOT):
     if (directory / "CURRENT").read_text().strip() != manifest["index_version"]:
         raise ValueError("Deployment CURRENT differs from the reviewed index.")
     if (
-        hashlib.sha256((root / "data/scholarship_dataset_ready.json").read_bytes()).hexdigest()
+        hashlib.sha256(((root / "data/processed/scholarship_dataset_ready.json") if (root / "data/processed/scholarship_dataset_ready.json").exists() else (root / "data/scholarship_dataset_ready.json")).read_bytes()).hexdigest()
         != manifest["corpus_sha256"]
     ):
         raise ValueError("The deployment corpus differs from the reviewed index.")
@@ -121,7 +121,7 @@ def check_model(manifest, root=ROOT):
     if model_name() != manifest["embedding_model"]:
         raise ValueError("The configured model differs from the packaged index.")
     load_dataset()
-    store, _ = FAISSVectorStore.load(root / "var/index")
+    store, _ = FAISSVectorStore.load((root / "data/index") if (root / "data/index").exists() else (root / "var/index"))
     vector = embed_query("Scholarship benefits and application documents")
     if vector.shape != (1, manifest["dimension"]) or store.vectors.shape != (
         manifest["chunk_count"],

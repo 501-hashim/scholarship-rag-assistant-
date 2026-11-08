@@ -47,7 +47,8 @@ COMMON = {
 
 
 def index_dir() -> Path:
-    path = Path(os.getenv("VECTOR_INDEX_DIR", "var/index"))
+    default_dir = "data/index" if (corpus.ROOT / "data/index").exists() else "var/index"
+    path = Path(os.getenv("VECTOR_INDEX_DIR", default_dir))
     return path if path.is_absolute() else corpus.ROOT / path
 
 

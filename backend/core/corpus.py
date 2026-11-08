@@ -9,7 +9,16 @@ from typing import Any
 from core.schemas import Citation
 
 ROOT = Path(__file__).resolve().parents[2]
-DATASET = ROOT / "data/scholarship_dataset_ready.json"
+def _resolve_corpus_path(relative_primary: str, relative_fallback: str) -> Path:
+    primary = ROOT / relative_primary
+    if primary.exists():
+        return primary
+    return ROOT / relative_fallback
+
+
+DATASET = _resolve_corpus_path(
+    "data/processed/scholarship_dataset_ready.json", "data/scholarship_dataset_ready.json"
+)
 
 
 @lru_cache(maxsize=1)
@@ -27,7 +36,10 @@ def load_dataset() -> dict[str, Any]:
         ):
             raise ValueError("A source record is missing required corpus fields.")
     original = json.loads(
-        (ROOT / "data/combined_scholarship_schemes_cleaned.json").read_text(encoding="utf-8")
+        _resolve_corpus_path(
+            "data/raw/combined_scholarship_schemes_cleaned.json",
+            "data/combined_scholarship_schemes_cleaned.json",
+        ).read_text(encoding="utf-8")
     )["schemes"]
     for scheme in schemes:
         key = scheme["provenance"]["original_record_key"]

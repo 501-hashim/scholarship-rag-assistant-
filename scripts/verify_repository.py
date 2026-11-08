@@ -21,7 +21,8 @@ def main():
 
     manifest = load_manifest()
     validate_index(manifest)
-    allowed_index = {"var/index/" + name for name in index_paths(manifest)}
+    index_prefix = "data/index/" if (ROOT / "data/index").exists() else "var/index/"
+    allowed_index = {index_prefix + name for name in index_paths(manifest)}
     dataset = load_dataset()
     schema = json.loads(
         (ROOT / "backend/schemas/assistant_response_schema.json").read_text(encoding="utf-8")

@@ -126,7 +126,10 @@ scholarship-rag-assistant/
 │       ├── styles/                 # Application design system & global CSS
 │       ├── App.tsx                 # Root application router
 │       └── main.tsx                # Client bootstrap
-├── data/                           # Verified scholarship corpus & QA reports
+├── data/                           # Structured data & indexing repository
+│   ├── index/                      # Pre-packaged vector store index & chunk offsets
+│   ├── processed/                  # Canonical verified scholarship datasets (JSON / JSONL)
+│   └── raw/                        # Preserved source schemes & QA audit reports
 ├── evaluation/                     # RAGAS benchmarks, adapters & evaluation suites
 ├── deploy/                         # Nginx configurations & deployment manifests
 ├── docker-compose.yml              # Multi-container orchestration (Backend, Qdrant, MySQL)

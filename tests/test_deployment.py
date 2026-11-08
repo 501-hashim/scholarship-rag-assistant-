@@ -149,10 +149,15 @@ def test_packaged_index_is_valid_and_tampering_is_rejected(tmp_path):
     for name in manifest["index_files"]:
         destination = tmp_path / "var/index" / name
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(ROOT / "var/index" / name, destination)
+        source_index = ROOT / "data/index" if (ROOT / "data/index").exists() else ROOT / "var/index"
+        shutil.copyfile(source_index / name, destination)
     (tmp_path / "data").mkdir()
     shutil.copyfile(
-        ROOT / "data/scholarship_dataset_ready.json",
+        (
+            ROOT / "data/processed/scholarship_dataset_ready.json"
+            if (ROOT / "data/processed/scholarship_dataset_ready.json").exists()
+            else ROOT / "data/scholarship_dataset_ready.json"
+        ),
         tmp_path / "data/scholarship_dataset_ready.json",
     )
     validate_index(manifest, tmp_path)
