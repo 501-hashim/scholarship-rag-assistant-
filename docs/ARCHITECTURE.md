@@ -1,30 +1,25 @@
-# Scholarship RAG architecture
+# Scholarship RAG Architecture
 
 ```mermaid
 flowchart TD
-    UI[Existing React workspace] --> API[Django API and validation]
+    UI[React 19 Workspace] --> API[Django REST API and validation]
     API --> Domain[Local semantic domain and intent check]
-    Domain -->|Unrelated| Redirect[Scholarship-only guidance: zero provider calls]
-    Domain -->|Relevant or uncertain| Query[Names and conversation references]
-    Corpus[16-scheme JSON dataset] --> Chunks[139 section-aware chunks]
-    Chunks --> Embeddings[MiniLM embeddings]
-    Embeddings --> FAISS[Existing persisted FAISS store]
+    Domain -->|Unrelated| Redirect[Scholarship-only guidance: zero LLM calls]
+    Domain -->|Relevant| Query[Query extraction & conversation context]
+    Corpus[Curated JSON dataset] --> Chunks[Section-aware chunks]
+    Chunks --> Embeddings[Embedding Model]
+    Embeddings --> VectorDB[Qdrant Vector Database]
     Query --> Retriever[Section-aware semantic retrieval]
-    FAISS --> Retriever
+    VectorDB --> Retriever
     Retriever --> Context[Deduplicated bounded evidence and recent history]
-    Context --> Gemini[Gemini natural-language generation]
-    Gemini --> Checks[Schema, evidence and URL validation]
+    Context --> LLM[Local Qwen3:4b LLM Generation]
+    LLM --> Checks[Schema, contiguous quote & numeric validation]
     Checks --> Review[Selective semantic grounding review]
-    Review --> Response[Actual generated answer and verified sources]
+    Review --> Response[Verified answer and authenticated sources]
     Response --> UI
-    UI --> Detail[View Full Scheme: existing internal detail route]
+    UI --> Detail[View Full Scheme detail route]
     Redirect --> UI
-    API --> SQL[Sessions, metadata, audit and usage: SQLite or MySQL]
+    API --> SQL[Sessions, metadata, audit & usage: MySQL / SQLite]
 ```
 
-RAG remains the factual engine: JSON -> embeddings/vector retrieval -> actual
-retrieved text -> LLM -> answer/sources. Domain descriptions and section constraints
-route information needs; they encode no scholarship eligibility rules or answers.
-Existing API shapes, provider/model configuration, dataset and vector files remain.
-Profile collection/matching remains removed. Application sections and source IDs
-are preserved. Current verification and limits are in DEMO_READINESS.md.
+RAG serves as the deterministic factual engine: JSON -> embeddings / vector retrieval -> bounded context -> LLM -> verified answer & sources. Domain gates prevent off-topic generation, while verbatim quote validators and numeric checks eliminate hallucinations.

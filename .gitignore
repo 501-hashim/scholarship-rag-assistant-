@@ -48,6 +48,8 @@ coverage/
 *.tsbuildinfo
 test-results/
 playwright-report/
+evaluation/reports/*.json
+evaluation/reports/**/*.json
 
 # Local databases, model/index caches, sessions, logs and runtime artifacts.
 *.sqlite

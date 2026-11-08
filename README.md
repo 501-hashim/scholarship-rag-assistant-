@@ -1,19 +1,13 @@
----
-title: Scholarship Navigator API & Workspace
-sdk: docker
-app_port: 8000
----
-
 # Scholarship Navigator
 
 [![Python](https://img.shields.io/badge/Python-3.12-blue.svg?logo=python&logoColor=white)](https://python.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![React](https://img.shields.io/badge/React-19.0-61DAFB.svg?logo=react&logoColor=black)](https://react.dev)
-[![Django](https://img.shields.io/badge/Django-6.1-092E20.svg?logo=django&logoColor=white)](https://djangoproject.com)
+[![Django](https://img.shields.io/badge/Django-5.2-092E20.svg?logo=django&logoColor=white)](https://djangoproject.com)
 [![Qdrant](https://img.shields.io/badge/Qdrant-Vector_DB-dc2626.svg?logo=qdrant&logoColor=white)](https://qdrant.tech)
 [![Ollama](https://img.shields.io/badge/Ollama-Qwen3_GPU-black.svg?logo=ollama&logoColor=white)](https://ollama.ai)
 [![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1.svg?logo=mysql&logoColor=white)](https://mysql.com)
-[![Tests](https://img.shields.io/badge/Tests-43_Passed-brightgreen.svg?logo=pytest&logoColor=white)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-Passed-brightgreen.svg?logo=pytest&logoColor=white)](tests/)
 
 An enterprise-grade, privacy-first scholarship intelligence platform powered by **Local Retrieval-Augmented Generation (RAG)**, deterministic grounding validation, and an automated multi-criteria eligibility matching engine. 
 
@@ -35,7 +29,7 @@ flowchart TD
         Web --> DashFE["features/workspace (Student Dashboard)"]
     end
 
-    AuthFE & ChatFE & MatchFE & BrowseFE -->|"REST API"| Gateway["Django 6.1 WSGI Gateway / DRF"]
+    AuthFE & ChatFE & MatchFE & BrowseFE -->|"REST API"| Gateway["Django 5.2 WSGI Gateway / DRF"]
 
     subgraph Backend ["Backend Architecture (Django + LangGraph)"]
         Gateway --> Router["Query Intent Classifier & Domain Gate"]

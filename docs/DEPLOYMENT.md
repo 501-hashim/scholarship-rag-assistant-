@@ -119,8 +119,8 @@ Gemini still requires HTTPS access. The FAISS bundle is packaged without rebuild
 SQLite stores Django users and sessions, private conversation messages,
 scholarship metadata, execution/usage logs and evaluation runs. An ephemeral
 filesystem loses those records on redeploy/restart, while packaged corpus/index/
-model files remain in the image. This is acceptable for a disposable hackathon
-demo only if losing those records is understood. For persistence, mount a disk
+model files remain in the image. This is acceptable for standalone evaluation
+environments only if losing those records is understood. For persistence, mount a disk
 at `/app/var/sqlite` and set `SQLITE_PATH=/app/var/sqlite/db.sqlite3`; ensure it is
 writable by UID 1000. Do not mount an empty disk over the entire /app/var, which
 would hide the FAISS bundle. Migrate at service startup because Render disks are
