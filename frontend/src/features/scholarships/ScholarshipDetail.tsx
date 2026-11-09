@@ -1,6 +1,7 @@
 import Assistant from "@/features/assistant/Assistant";
 import { Facts, Source } from "@/components/components";
 import type { Citation, Scheme } from "@/types/types";
+
 export default function ScholarshipDetail({
   detail,
   schemeId,
@@ -10,50 +11,103 @@ export default function ScholarshipDetail({
 }) {
   return (
     <section className="panel detail">
-      <a href="#/scholarships" className="back">
-        ← Back to scholarships
-      </a>
-      <div className="detail-heading">
-        <span className="eyebrow">{detail.scholarship.provider}</span>
-        <h2>{detail.scholarship.name}</h2>
-        <p>{detail.scholarship.objective}</p>
+      <div className="detail-nav">
+        <a href="#/scholarships" className="back-link">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <line x1="19" y1="12" x2="5" y2="12" />
+            <polyline points="12 19 5 12 12 5" />
+          </svg>
+          <span>Back to registry</span>
+        </a>
+        <span className="archive-code">DOSSIER // SCH-{schemeId.slice(0, 10).toUpperCase()}</span>
       </div>
+
+      <div className="detail-heading">
+        <div className="detail-heading-top">
+          <span className="eyebrow">{detail.scholarship.provider || "Government Ministry / Authority"}</span>
+          <span className="status-dot live" title="Active Index" />
+        </div>
+        <h2>{detail.scholarship.name}</h2>
+        {detail.scholarship.objective && (
+          <p className="detail-objective">{detail.scholarship.objective}</p>
+        )}
+      </div>
+
       <div className="detail-grid">
-        <div>
-          <h3>Target groups</h3>
-          <Facts value={detail.scholarship.target_groups} />
-          <h3>Eligibility criteria</h3>
-          <Facts value={detail.scholarship.eligibility} />
-          <h3>Benefits</h3>
-          <Facts value={detail.scholarship.benefits} />
-          <h3>Required documents</h3>
-          <Facts value={detail.scholarship.documents_required} />
-          <h3>Application procedure</h3>
-          <Facts value={detail.scholarship.application} />
-          <h3>Exclusions</h3>
-          <Facts value={detail.scholarship.exclusions} />
-          <h3>Selection and renewal</h3>
-          <Facts value={detail.scholarship.selection} />
-          {!!detail.scholarship.important_notes?.length && (
-            <>
-              <h3>Additional scheme notes</h3>
+        <div className="detail-sections">
+          <section className="dossier-block">
+            <h3>Target Groups & Beneficiaries</h3>
+            <Facts value={detail.scholarship.target_groups} />
+          </section>
+
+          <section className="dossier-block">
+            <h3>Eligibility Criteria</h3>
+            <Facts value={detail.scholarship.eligibility} />
+          </section>
+
+          <section className="dossier-block">
+            <h3>Financial Assistance & Benefits</h3>
+            <Facts value={detail.scholarship.benefits} />
+          </section>
+
+          <section className="dossier-block">
+            <h3>Required Documents</h3>
+            <Facts value={detail.scholarship.documents_required} />
+          </section>
+
+          <section className="dossier-block">
+            <h3>Application Procedure</h3>
+            <Facts value={detail.scholarship.application} />
+          </section>
+
+          {Boolean(detail.scholarship.exclusions) && (
+            <section className="dossier-block">
+              <h3>Exclusions & Restrictions</h3>
+              <Facts value={detail.scholarship.exclusions} />
+            </section>
+          )}
+
+          {Boolean(detail.scholarship.selection) && (
+            <section className="dossier-block">
+              <h3>Selection & Renewal Directives</h3>
+              <Facts value={detail.scholarship.selection} />
+            </section>
+          )}
+
+          {Boolean(detail.scholarship.important_notes?.length) && (
+            <section className="dossier-block notes">
+              <h3>Administrative Notes</h3>
               <Facts value={detail.scholarship.important_notes} />
-            </>
+            </section>
           )}
         </div>
-        <aside>
+
+        <aside className="detail-sidebar">
           <div className="detail-aside">
-            <h3>Understand your next step</h3>
+            <span className="aside-eyebrow">Corpus Citation</span>
+            <h4>Official Source Record</h4>
             <p>
-              Ask the assistant to explain these criteria or compare the
-              available information. The scholarship authority makes the final
-              eligibility decision.
+              Information extracted directly from authorized gazette notifications.
+              The awarding authority makes final determinations upon application submission.
             </p>
             <Source citation={detail.citation} />
           </div>
         </aside>
       </div>
-      <Assistant schemeId={schemeId} />
+
+      <div className="detail-assistant-wrap">
+        <Assistant schemeId={schemeId} />
+      </div>
     </section>
   );
 }
